@@ -1,29 +1,5 @@
-  envs/
-    dmc.py
-  data/
-    replay_buffer.py
-    augmentations.py
-  models/
-    encoder.py          # QE/KE architettura
-    actor.py            # SAC actor
-    critic.py           # SAC critic (2 Q)
-    action_embed.py     # AE
-    fdm.py              # Forward dynamics model g_phi
-  losses/
-    contrastive.py      # InfoNCE logits + CE
-    intrinsic.py        # curiosity reward (Eq.9 + normalizzazione + decay)
-  agents/
-    sac.py              # update SAC (actor/critic/alpha)
-    ccfdm_agent.py      # orchestration: sample batch -> aug -> QE/KE -> FDM -> loss -> ri -> SAC
-  utils/
-    ema.py              # update KE = tau*QE + (1-tau)*KE
-    logger.py
-    seed.py
-  scripts/
-    train_ccfdm.py
-    eval.py
 
-
+OSSERAVAZIOI
 La Project Description lo chiede esplicitamente.  ￼
 Quindi ti serve un secondo metodo: 
 	•	ICM (Pathak): inverse model + forward model in feature space, intrinsic = prediction error.
@@ -31,7 +7,7 @@ Quindi ti serve un secondo metodo:
 	•	baselines/icm.py oppure agents/icm_agent.py (consiglio “baselines/”).
     ( proposta mia: se non abbiamo tempo prendiamo risultati stato dell'arte sulla stessa task 
         e li confrontiamo senza implementare anche quello) 
-----------------------------------------
+
 
 PER FARE I CONFRONTI 
  Il consiglio migliore: un solo train script parametrico:
