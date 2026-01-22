@@ -316,6 +316,80 @@ Aggiornamento EMA:
   - SAC only
 
 ---
+## 🔧 Training parametrico e modularità sperimentale
+
+L’intero progetto è progettato per supportare **training parametrico e sperimentazione controllata**, senza modificare la struttura dell’algoritmo CCFDM.
+
+Tutti gli elementi **variabili** del training sono isolati e configurabili:
+- **ambienti** (GridWorld, MiniGrid, DMC) tramite `envs/make_env.py`
+- **loss contrastive** tramite moduli intercambiabili in `losses/`
+- **curiosity / intrinsic reward** tramite `losses/intrinsic.py`
+- **iperparametri di training** (τ, γ, C, batch size, encoder dim, ecc.) tramite config o argomenti di script
+
+Questo permette di:
+- confrontare **diverse contrastive loss** (InfoNCE, BYOL-style, SupCon) **a parità di agente**
+- testare la **generalizzazione cross-task** usando la stessa architettura
+- passare da ambienti semplici (GridWorld) a complessi (DMC) **senza cambiare encoder o agente**
+- eseguire **ablation study** disattivando singoli moduli (FDM, intrinsic reward, EMA, ecc.)
+
+Il file `agents/ccfdm_agent.py` rimane **immutato**:  
+ogni variazione sperimentale avviene **per composizione**, non per riscrittura del codice.
+
+Questo approccio garantisce:
+- riproducibilità
+- confronti equi
+- estensibilità del framework
+- aderenza rigorosa al paper originale
+
+## 🔧 Come realizzare training parametrico e confronti sperimentali
+
+La modularità del progetto non è solo concettuale, ma **realizzata a livello di codice** tramite una separazione netta tra:
+- **orchestrazione** (script)
+- **algoritmo** (agent)
+- **componenti sostituibili** (env, loss, modelli)
+
+### Ambienti
+Tutti gli ambienti sono creati tramite una **factory unica** (`envs/make_env.py`).
+Ogni nuovo ambiente (GridWorld, MiniGrid, DMC, ecc.) deve:
+- restituire osservazioni RGB normalizzate (`uint8 [C, 84, 84]`)
+- esporre azioni come `float32`, anche se discrete internamente
+- rispettare la stessa interfaccia `reset / step`
+
+In questo modo **l’agent e l’encoder non cambiano mai**, indipendentemente dal task.
+
+### Loss contrastive
+Le loss contrastive sono isolate nella cartella `losses/`.
+Ogni loss è implementata come modulo indipendente (es. `InfoNCE`, `BYOL-style`, `SupCon`)
+e può essere selezionata:
+- tramite flag/config
+- oppure istanziata dinamicamente in `ccfdm_agent.py`
+
+Il training loop resta invariato: cambia solo **la funzione di loss**, non la pipeline.
+
+### Curiosity e intrinsic reward
+Il calcolo dell’intrinsic reward è separato in `losses/intrinsic.py`.
+Questo permette di:
+- modificare normalizzazione, decay o clipping
+- disattivare completamente la curiosità
+- confrontare CCFDM con baseline (SAC / CURL-only)
+
+senza introdurre dipendenze con il replay buffer o l’ambiente.
+
+### Training loop
+Gli script in `scripts/` (es. `train_ccfdm.py`) contengono **solo**:
+- parsing dei parametri
+- creazione di env, agent e logger
+- gestione del loop di training ed evaluation
+
+Tutta la logica algoritmica rimane confinata in `agents/ccfdm_agent.py`.
+
+Questo design consente di effettuare:
+- ablation study
+- confronti tra loss
+- generalizzazione cross-environment
+- scaling progressivo della difficoltà del task
+
+**senza riscrivere codice e senza introdurre bias strutturali.**
 
 ## ✅ Obiettivo finale
 
@@ -324,3 +398,4 @@ Una **riproduzione fedele del paper**, con:
 - separazione netta dei ruoli
 - generalizzazione cross-task
 - confronti sperimentali solidi
+  
