@@ -321,3 +321,4 @@ Una **riproduzione fedele del paper CCFDM**, con:
 - pip install gymnasium minigrid
 - pip install dm_control
 - pip install pillow
+- pip install opencv-python
