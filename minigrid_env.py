@@ -1,26 +1,25 @@
-# dmc.py
+# minigrid.py
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Union
 import numpy as np
-
-from dm_control import suite
-from dm_control.suite.wrappers import pixels
+import gymnasium as gym
+from minigrid.wrappers import RGBImgObsWrapper
 from PIL import Image
 
 
+def _to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
 
-def _resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
-    if img_hwc.dtype != np.uint8:
-        img_hwc = img_hwc.astype(np.uint8)
-
-    im = Image.fromarray(img_hwc)
-    im = im.resize((image_size, image_size), resample=Image.BILINEAR)
-    arr = np.asarray(im, dtype=np.uint8)     # HWC
-    chw = np.transpose(arr, (2, 0, 1))       # CHW
+    if obs_rgb_hwc.dtype != np.uint8:
+        obs_rgb_hwc = obs_rgb_hwc.astype(np.uint8)
+    img = Image.fromarray(obs_rgb_hwc)
+    img = img.resize((image_size, image_size), resample=Image.BILINEAR)
+    arr = np.asarray(img, dtype=np.uint8)  # HWC
+    chw = np.transpose(arr, (2, 0, 1))     # CHW
     return chw
 
 
 class FrameStack:
+
     def __init__(self, k: int, obs_shape_chw: Tuple[int, int, int]):
         self.k = int(k)
         c, h, w = obs_shape_chw
@@ -44,95 +43,111 @@ class FrameStack:
         return self._frames.reshape(self.k * self._frames.shape[1], self._frames.shape[2], self._frames.shape[3])
 
 
-class DMCEnv:
-
+class MiniGridContinuousWrapper:
 
     def __init__(
         self,
-        domain: str,
-        task: str,
+        env_id: str,
         image_size: int = 84,
         frame_stack: int = 3,
         action_repeat: int = 1,
         seed: int = 1,
-        camera_id: int = 0,
         max_episode_steps: Optional[int] = None,
     ):
-        self.domain = domain
-        self.task = task
+        self.env_id = env_id
         self.image_size = int(image_size)
         self.frame_stack = int(frame_stack)
         self.action_repeat = int(action_repeat)
         self.seed = int(seed)
-        self.camera_id = int(camera_id)
         self.max_episode_steps = max_episode_steps
 
-        
-        env = suite.load(domain_name=domain, task_name=task, task_kwargs={"random": seed})
+      
+        env = gym.make(env_id)
 
-       
-        env = pixels.Wrapper(
-            env,
-            pixels_only=True,
-            render_kwargs={
-                "height": image_size,
-                "width": image_size,
-                "camera_id": camera_id,
-            },
-        )
+        env = RGBImgObsWrapper(env)
+
         self._env = env
 
-       
-        action_spec = self._env.action_spec()
-        self.action_shape = tuple(action_spec.shape)
-        self.action_low = np.array(action_spec.minimum, dtype=np.float32)
-        self.action_high = np.array(action_spec.maximum, dtype=np.float32)
+        if not isinstance(self._env.action_space, gym.spaces.Discrete):
+            raise ValueError("discrete (MiniGrid).")
 
-    
+        self._n_actions = int(self._env.action_space.n)
+
+        # Output obs shape: (3*frame_stack, image_size, image_size)
         self.obs_shape = (3 * self.frame_stack, self.image_size, self.image_size)
 
+
+        self.action_shape = (1,)
+        self.action_low = np.array([-1.0], dtype=np.float32)
+        self.action_high = np.array([1.0], dtype=np.float32)
+
         self._fs = FrameStack(self.frame_stack, (3, self.image_size, self.image_size))
+
         self._t = 0
+
+    def _continuous_to_discrete(self, action: Union[float, int, np.ndarray]) -> int:
+        
+        if isinstance(action, np.ndarray):
+            if action.size == 0:
+                a = 0.0
+            else:
+                a = float(action.reshape(-1)[0])
+        else:
+            a = float(action)
+
+        # clamp in [-1, 1]
+        a = max(-1.0, min(1.0, a))
+
+        # map [-1,1] -> [0, n-1] (discrete)
+        if self._n_actions == 1:
+            return 0
+
+        scaled = (a + 1.0) * 0.5 * (self._n_actions - 1)
+        idx = int(np.round(scaled))
+        idx = max(0, min(self._n_actions - 1, idx))
+        return idx
 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         self._t = 0
-        ts = self._env.reset()
+        obs, info = self._env.reset(seed=self.seed)
 
-        obs = ts.observation
-        img = obs["pixels"] if isinstance(obs, dict) else obs  
-
-        frame = _resize_to_uint8_chw(img, self.image_size)
+        img = obs["image"]  
+        frame = _to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.reset(frame)
-        return stacked, {}
+
+        return stacked, info
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-    
-        a = np.asarray(action, dtype=np.float32).reshape(self.action_shape)
-        a = np.clip(a, self.action_low, self.action_high)
+        """
+        action: np.ndarray shape (1,) in [-1,1]
+        """
+        a_discrete = self._continuous_to_discrete(action)
 
         total_reward = 0.0
         done = False
         info: Dict[str, Any] = {}
 
-        ts = None
+        last_obs = None
+
         for _ in range(self.action_repeat):
-            ts = self._env.step(a)
-            r = ts.reward if ts.reward is not None else 0.0
-            total_reward += float(r)
-            done = bool(ts.last())
+            obs, reward, terminated, truncated, info = self._env.step(a_discrete)
+            total_reward += float(reward)
+            done = bool(terminated or truncated)
+
+            last_obs = obs
 
             self._t += 1
             if self.max_episode_steps is not None and self._t >= int(self.max_episode_steps):
                 done = True
+                info = dict(info)
                 info["TimeLimit.truncated"] = True
 
             if done:
                 break
 
-        assert ts is not None
-        obs = ts.observation
-        img = obs["pixels"] if isinstance(obs, dict) else obs  # <-- FIX
-        frame = _resize_to_uint8_chw(img, self.image_size)
+        assert last_obs is not None
+        img = last_obs["image"]  # HWC
+        frame = _to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.push(frame)
 
         return stacked, total_reward, done, info
@@ -142,23 +157,20 @@ class DMCEnv:
             self._env.close()
 
 
-def make_dmc_env(
-    domain: str,
-    task: str,
+def make_minigrid_env(
+    env_id: str,
     image_size: int = 84,
     frame_stack: int = 3,
     action_repeat: int = 1,
     seed: int = 1,
-    camera_id: int = 0,
     max_episode_steps: Optional[int] = None,
-) -> DMCEnv:
-    return DMCEnv(
-        domain=domain,
-        task=task,
+) -> MiniGridContinuousWrapper:
+   
+    return MiniGridContinuousWrapper(
+        env_id=env_id,
         image_size=image_size,
         frame_stack=frame_stack,
         action_repeat=action_repeat,
         seed=seed,
-        camera_id=camera_id,
         max_episode_steps=max_episode_steps,
     )

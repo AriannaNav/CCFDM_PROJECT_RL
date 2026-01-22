@@ -320,3 +320,4 @@ Una **riproduzione fedele del paper CCFDM**, con:
 ## Cosa Installare
 - pip install gymnasium minigrid
 - pip install dm_control
+- pip install pillow
