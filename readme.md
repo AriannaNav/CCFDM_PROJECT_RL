@@ -316,3 +316,7 @@ Una **riproduzione fedele del paper CCFDM**, con:
 - struttura coerente
 - generalizzazione cross-task
 - base solida per ricerca e tesi
+
+## Cosa Installare
+- pip install gymnasium minigrid
+- pip install dm_control
