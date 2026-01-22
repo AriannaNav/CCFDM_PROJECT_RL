@@ -1,0 +1,163 @@
+1) Prima milestone: “BOOTSTRAP RUN” (ti deve stampare device/seed e fare 1 step)
+
+Obiettivo
+
+Far partire train_ccfdm.py e vedere:
+	•	device scelto (cpu o mps)
+	•	seed impostato
+	•	env creato e reset/step ok
+	•	replay buffer che “accetta” una transizione
+
+Dove lavorare
+	•	utils.py: ci metti get_device + set_seed (e piccole utility comuni)
+	•	make_env.py: factory che crea env e applica output standard
+	•	train_ccfdm.py: modalità --test_utils e/o --dry_run
+
+Questa milestone ti evita di “scrivere l’algoritmo” prima di avere fondamenta solide.
+
+⸻
+
+2) Standardizzazione ENV: è la chiave per generalizzare (GridWorld/MiniGrid/DMC)
+
+La project description vuole poter cambiare env mantenendo la stessa codebase.  ￼
+Quindi in make_env.py devi imporre un contratto unico:
+
+Contratto minimo (per tutti gli env)
+
+Ogni step() deve restituire:
+	•	obs: uint8 shape [C, 84, 84] (tipicamente C=3 o C=3*k se frame-stack)
+	•	action: il tuo agente lavora in float32 (anche se l’env è discreto)
+	•	reward: float
+	•	done: bool
+	•	info: dict (puoi metterci visited_cells, room_id, ecc. per coverage)
+
+Cosa fare per env discreti (GridWorld/MiniGrid)
+	•	SAC genera a_cont in [-1, 1] (continuous)
+	•	tu lo converti in azione discreta dentro minigrid.py (wrapper):
+	•	es: a_discrete = int( (a_cont+1)/2 * (n_actions-1) )
+
+Così non tocchi encoder né agente quando cambi env: cambi solo wrapper.
+
+⸻
+
+3) Replay buffer (data.py): prima “semplice”, poi “CCFDM-ready”
+
+Paper: CCFDM campiona batch dal replay buffer e usa augmentation/encoder/FDM su batch.  ￼
+
+Adesso (subito)
+
+In data.py implementa un replay buffer minimo:
+	•	add(obs, action, reward, next_obs, done)
+	•	sample(batch_size) → tensori su device
+
+Subito dopo (CCFDM-ready)
+
+Aggiungi:
+	•	sampling che ritorna anche obs_next per contrastive
+	•	supporto a obs uint8 (salvi in uint8, converti a float32/normalize solo in batch)
+
+⸻
+
+4) Encoder + EMA (encoder.py + ema.py o tutto in encoder.py)
+
+Paper: Query Encoder (QE) e Key Encoder (KE); KE è una moving average (stile MoCo).  ￼
+
+Step pratici
+	1.	Implementa PixelEncoder (CNN → embedding z)
+	2.	Crea due istanze: qe, ke
+	3.	ke:
+	•	requires_grad_(False)
+	•	aggiornato con EMA: ke = tau*qe + (1-tau)*ke
+
+⸻
+
+5) Forward Dynamics Model + Action Embedding (models.py)
+
+Paper: action embedding + FDM che predice in latent space.  ￼
+
+In models.py metti:
+	•	ActionEmbedding(a) -> ae
+	•	FDM(z_t, ae) -> z_pred_next
+
+⸻
+
+6) Losses (losses.py): InfoNCE + intrinsic reward
+
+Project description: vuoi anche confrontare diverse contrastive loss (InfoNCE, triplet, BYOL-style).  ￼
+Quindi in losses.py fai una cosa pulita:
+	•	infonce_logits(q_pred, k_pos, k_negs, temperature)
+	•	contrastive_loss(...) -> scalar
+	•	intrinsic_reward(z_pred, z_target): distanza in latent (Eq.9 nel paper, più normalizzazione/decay)  ￼
+
+E già qui puoi predisporre:
+	•	--contrastive infonce|triplet|byol
+
+⸻
+
+7) SAC baseline (sac.py) + networks (models.py)
+
+Paper include SAC come base e CCFDM “si innesta” nei reward/feature.  ￼
+
+Sequenza consigliata
+	1.	fai funzionare SAC puro su un env semplice (MiniGrid wrapperizzato o un continuous facile)
+	2.	solo dopo aggiungi CCFDM
+
+Perché: se SAC non gira, non sai mai se l’errore è in SAC o in CCFDM.
+
+⸻
+
+8) CCFDM agent orchestration (ccfdm_agent.py)
+
+Questo file diventa “Algorithm 1 in codice”.
+
+Pipeline (la tua):
+	1.	sample batch dal replay buffer
+	2.	augmentation su obs/next_obs
+	3.	encodings: q = QE(obs_aug), k_pos = KE(next_obs_aug)
+	4.	ae = ActionEmbedding(action)
+	5.	q_pred = FDM(q, ae)
+	6.	InfoNCE su (q_pred, k_pos, negatives=batch)
+	7.	intrinsic reward = distanza latent (pred vs target) + normalizzazione + decay
+	8.	reward totale = r_ext + beta(t)*r_int
+	9.	update: encoder + AE + FDM + SAC
+	10.	EMA update per KE
+
+Questa è esattamente la descrizione del framework nel paper.  ￼
+
+⸻
+
+9) Eval e metriche (eval.py)
+
+La project description ti chiede esplicitamente: coverage, sample efficiency, policy stability.  ￼
+
+Implementale così (pratico e difendibile):
+
+Sample efficiency
+	•	curva return vs env_steps
+	•	stampa score a step fissi (100k, 500k) come nel vecchio script plot.
+
+State-space coverage
+	•	GridWorld/MiniGrid: celle visitate / entropia visite (usa info dall’env wrapper)
+	•	Pixel/DMC: usa embeddings QE:
+	•	salva z durante eval
+	•	misura dispersione (varianza per dimensione, oppure k-means occupancy)
+
+Policy stability
+	•	varianza return su N eval episodes
+	•	stabilità policy: es. differenza media tra azioni su stessi obs in checkpoint diversi (simple)
+
+⸻
+
+10) Confronti richiesti: Pathak vs Nguyen (contrastive)
+
+Project description: confronto tra curiosity classica (Pathak/ICM) e contrastive curiosity (Nguyen/CCFDM).  ￼
+
+Come lo fai senza riscrivere tutto:
+	•	aggiungi in losses.py una modalità intrinsic_mode:
+	•	ccfdm: distanza FDM in latent (quella del paper)
+	•	icm: ICM semplice (feature encoder + inverse/forward) oppure baseline “prediction error” senza contrastive
+
+Così in training cambi solo flag:
+	•	--intrinsic ccfdm
+	•	--intrinsic icm
+	•	--intrinsic none
