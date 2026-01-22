@@ -1,34 +1,3 @@
-
-OSSERAVAZIOI
-La Project Description lo chiede esplicitamente.  ￼
-Quindi ti serve un secondo metodo: 
-	•	ICM (Pathak): inverse model + forward model in feature space, intrinsic = prediction error.
-	•	Tu puoi metterlo in:
-	•	baselines/icm.py oppure agents/icm_agent.py (consiglio “baselines/”).
-    ( proposta mia: se non abbiamo tempo prendiamo risultati stato dell'arte sulla stessa task 
-        e li confrontiamo senza implementare anche quello) 
-
-
-PER FARE I CONFRONTI 
- Il consiglio migliore: un solo train script parametrico:
-	•	train_ccfdm.py con flag tipo:
-	•	--env dmc_cartpole_swingup
-	•	--env minigrid_empty_8x8
-	•	--env gridworld_custom
-	•	--algo sac | ccfdm
-	•	--loss infonce | byol | ...
-DA AGGIUNGERE IN LOSSES 
-In losses/:
-	•	contrastive.py (contiene InfoNCE del paper)
-	•	contrastive_byol.py (se vuoi BYOL-like)
-	•	contrastive_supcon.py (se vuoi supervised contrastive / variant)
-	•	contrastive_moco.py (se vuoi MoCo-style, anche se già usi EMA)
-
-Poi in agents/ccfdm_agent.py fai selezione:
-	•	loss_name = cfg.loss.contrastive
-	•	loss_fn = make_contrastive_loss(loss_name)
-
-
 🔹 agents/
 
 agents/sac.py
