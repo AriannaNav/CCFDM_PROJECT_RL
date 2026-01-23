@@ -63,3 +63,22 @@ def set_seed(seed: int,deterministic: bool = False,device: Optional[torch.device
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     _ = device
 
+def soft_update(
+    target: torch.nn.Module,
+    source: torch.nn.Module,
+    tau: float,
+) -> None:
+    """
+    target = tau * source + (1 - tau) * target
+    """
+    with torch.no_grad():
+        for tp, sp in zip(target.parameters(), source.parameters()):
+            tp.data.mul_(1.0 - tau)
+            tp.data.add_(tau * sp.data)
+
+def hard_update(
+    target: torch.nn.Module,
+    source: torch.nn.Module,
+) -> None:
+    target.load_state_dict(source.state_dict())
+
