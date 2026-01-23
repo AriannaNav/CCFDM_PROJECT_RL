@@ -9,7 +9,7 @@ from dm_control.suite.wrappers import pixels
 from PIL import Image
 
 
-def resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
+def resize_to_uint8_chw(img_hwc, image_size):
     if img_hwc.dtype != np.uint8:
         img_hwc = img_hwc.astype(np.uint8)
 
@@ -21,26 +21,26 @@ def resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
 
 
 class FrameStack:
-    def __init__(self, k: int, obs_shape_chw: Tuple[int, int, int]):
+    def __init__(self, k, obs_shape_chw):
         self.k = int(k)
         c, h, w = obs_shape_chw
         self._frames = np.zeros((self.k, c, h, w), dtype=np.uint8)
         self._filled = False
 
-    def reset(self, first_frame: np.ndarray) -> np.ndarray:
+    def reset(self, first_frame) :
         for i in range(self.k):
             self._frames[i] = first_frame
         self._filled = True
         return self.get()
 
-    def push(self, frame: np.ndarray) -> np.ndarray:
+    def push(self, frame):
         if not self._filled:
             return self.reset(frame)
         self._frames[:-1] = self._frames[1:]
         self._frames[-1] = frame
         return self.get()
 
-    def get(self) -> np.ndarray:
+    def get(self):
         return self._frames.reshape(
             self.k * self._frames.shape[1],
             self._frames.shape[2],
@@ -58,14 +58,14 @@ class DMCEnv:
 
     def __init__(
         self,
-        domain: str,
-        task: str,
-        image_size: int = 84,
-        frame_stack: int = 3,
-        action_repeat: int = 1,
-        seed: int = 1,
-        camera_id: int = 0,
-        max_episode_steps: Optional[int] = None,
+        domain,
+        task,
+        image_size,
+        frame_stack,
+        action_repeat,
+        seed,
+        camera_id,
+        max_episode_steps,
     ):
         self.domain = domain
         self.task = task
@@ -99,7 +99,7 @@ class DMCEnv:
         self._fs = FrameStack(self.frame_stack, (3, self.image_size, self.image_size))
         self._t = 0
 
-    def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self) :
         self._t = 0
         ts = self._env.reset()
         obs = ts.observation
@@ -108,7 +108,7 @@ class DMCEnv:
         stacked = self._fs.reset(frame)
         return stacked, {}
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action) :
         a = np.asarray(action, dtype=np.float32).reshape(self.action_shape)
         a = np.clip(a, self.action_low, self.action_high)
 
@@ -144,21 +144,21 @@ class DMCEnv:
 
         return stacked, total_reward, terminated, truncated, info
 
-    def close(self) -> None:
+    def close(self) :
         if hasattr(self._env, "close"):
             self._env.close()
 
 
 def make_dmc_env(
-    domain: str,
-    task: str,
-    image_size: int = 84,
-    frame_stack: int = 3,
-    action_repeat: int = 1,
-    seed: int = 1,
-    camera_id: int = 0,
-    max_episode_steps: Optional[int] = None,
-) -> DMCEnv:
+    domain,
+    task,
+    image_size,
+    frame_stack,
+    action_repeat,
+    seed,
+    camera_id,
+    max_episode_steps,
+) :
     return DMCEnv(
         domain=domain,
         task=task,
