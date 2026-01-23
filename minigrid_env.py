@@ -1,6 +1,8 @@
-# minigrid.py
+# minigrid_env.py
 from __future__ import annotations
+
 from typing import Optional, Tuple, Dict, Any, Union
+
 import numpy as np
 import gymnasium as gym
 from minigrid.wrappers import RGBImgObsWrapper
@@ -8,18 +10,21 @@ from PIL import Image
 
 
 def to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
-
+    """
+    Input: HWC uint8 (or castable)
+    Output: CHW uint8 resized to (image_size, image_size)
+    """
     if obs_rgb_hwc.dtype != np.uint8:
         obs_rgb_hwc = obs_rgb_hwc.astype(np.uint8)
+
     img = Image.fromarray(obs_rgb_hwc)
     img = img.resize((image_size, image_size), resample=Image.BILINEAR)
-    arr = np.asarray(img, dtype=np.uint8)  # HWC
-    chw = np.transpose(arr, (2, 0, 1))     # CHW
+    arr = np.asarray(img, dtype=np.uint8)      # HWC
+    chw = np.transpose(arr, (2, 0, 1))         # CHW
     return chw
 
 
 class FrameStack:
-
     def __init__(self, k: int, obs_shape_chw: Tuple[int, int, int]):
         self.k = int(k)
         c, h, w = obs_shape_chw
@@ -40,10 +45,20 @@ class FrameStack:
         return self.get()
 
     def get(self) -> np.ndarray:
-        return self._frames.reshape(self.k * self._frames.shape[1], self._frames.shape[2], self._frames.shape[3])
+        # (k, C, H, W) -> (k*C, H, W)
+        return self._frames.reshape(
+            self.k * self._frames.shape[1],
+            self._frames.shape[2],
+            self._frames.shape[3],
+        )
 
 
 class MiniGridContinuousWrapper:
+    """
+    MiniGrid has Discrete action space, but SAC is continuous.
+    We map a continuous scalar action in [-1,1] to a discrete action via binning.
+    This is a pragmatic proxy for quick experimentation.
+    """
 
     def __init__(
         self,
@@ -61,22 +76,19 @@ class MiniGridContinuousWrapper:
         self.seed = int(seed)
         self.max_episode_steps = max_episode_steps
 
-      
         env = gym.make(env_id)
-
-        env = RGBImgObsWrapper(env)
-
+        env = RGBImgObsWrapper(env)  # gives obs dict with "image" (HWC RGB)
         self._env = env
 
         if not isinstance(self._env.action_space, gym.spaces.Discrete):
-            raise ValueError("discrete (MiniGrid).")
+            raise ValueError("MiniGrid action space must be Discrete.")
 
         self._n_actions = int(self._env.action_space.n)
 
-        # Output obs shape: (3*frame_stack, image_size, image_size)
+        # Observation format for the rest of the project: uint8 CHW stacked
         self.obs_shape = (3 * self.frame_stack, self.image_size, self.image_size)
 
-
+        # Continuous proxy action space for SAC
         self.action_shape = (1,)
         self.action_low = np.array([-1.0], dtype=np.float32)
         self.action_high = np.array([1.0], dtype=np.float32)
@@ -84,73 +96,68 @@ class MiniGridContinuousWrapper:
         self._fs = FrameStack(self.frame_stack, (3, self.image_size, self.image_size))
 
         self._t = 0
+        self._episode_idx = 0
 
-    def _continuous_to_discrete(self, action: Union[float, int, np.ndarray]) -> int:
-        
+    def continuous_to_discrete(self, action: Union[float, int, np.ndarray]) -> int:
         if isinstance(action, np.ndarray):
-            if action.size == 0:
-                a = 0.0
-            else:
-                a = float(action.reshape(-1)[0])
+            a = float(action.reshape(-1)[0]) if action.size > 0 else 0.0
         else:
             a = float(action)
 
-        # clamp in [-1, 1]
         a = max(-1.0, min(1.0, a))
 
-        # map [-1,1] -> [0, n-1] (discrete)
-        if self._n_actions == 1:
+        if self._n_actions <= 1:
             return 0
 
         scaled = (a + 1.0) * 0.5 * (self._n_actions - 1)
         idx = int(np.round(scaled))
-        idx = max(0, min(self._n_actions - 1, idx))
-        return idx
+        return max(0, min(self._n_actions - 1, idx))
 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         self._t = 0
-        obs, info = self._env.reset(seed=self.seed)
+        seed = self.seed + self._episode_idx
+        self._episode_idx += 1
 
-        img = obs["image"]  
+        obs, info = self._env.reset(seed=seed)
+        img = obs["image"] if isinstance(obs, dict) else obs  # HWC uint8
         frame = to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.reset(frame)
-
         return stacked, info
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-        """
-        action: np.ndarray shape (1,) in [-1,1]
-        """
-        a_discrete = self._continuous_to_discrete(action)
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+        a_discrete = self.continuous_to_discrete(action)
 
         total_reward = 0.0
-        done = False
+        terminated = False
+        truncated = False
         info: Dict[str, Any] = {}
 
         last_obs = None
 
         for _ in range(self.action_repeat):
-            obs, reward, terminated, truncated, info = self._env.step(a_discrete)
+            obs, reward, term, trunc, info = self._env.step(a_discrete)
             total_reward += float(reward)
-            done = bool(terminated or truncated)
-
             last_obs = obs
 
             self._t += 1
-            if self.max_episode_steps is not None and self._t >= int(self.max_episode_steps):
-                done = True
+            terminated = bool(term)
+            truncated = bool(trunc)
+
+            # Apply external time limit in Gym-standard way
+            if self.max_episode_steps is not None and self._t >= int(self.max_episode_steps) and not terminated:
+                truncated = True
                 info = dict(info)
                 info["TimeLimit.truncated"] = True
 
-            if done:
+            if terminated or truncated:
                 break
 
         assert last_obs is not None
-        img = last_obs["image"]  # HWC
+        img = last_obs["image"] if isinstance(last_obs, dict) else last_obs  # HWC
         frame = to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.push(frame)
 
-        return stacked, total_reward, done, info
+        return stacked, total_reward, terminated, truncated, info
 
     def close(self) -> None:
         if hasattr(self._env, "close"):
@@ -165,7 +172,6 @@ def make_minigrid_env(
     seed: int = 1,
     max_episode_steps: Optional[int] = None,
 ) -> MiniGridContinuousWrapper:
-   
     return MiniGridContinuousWrapper(
         env_id=env_id,
         image_size=image_size,
