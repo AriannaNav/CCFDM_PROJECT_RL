@@ -60,6 +60,3 @@ def main():
     # ---------------------------------------------------
     print("[INFO] Starting training (not implemented yet).")
 
-
-if __name__ == "__main__":
-    main()

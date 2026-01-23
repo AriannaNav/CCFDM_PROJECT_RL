@@ -87,6 +87,8 @@ così come descritto nel paper (**Algorithm 1**).
 ### `sac.py`
 
 Implementazione **pura** di Soft Actor-Critic.
+-ACTOR 
+-CRITIC
 
 **Caratteristiche**
 - 2 Q-networks
@@ -114,8 +116,6 @@ Serve come:
 
 ### `models.py`
 Contiene:
-- Actor (SAC)
-- Critic (SAC)
 - Action Embedding (AE)
 - Forward Dynamics Model (FDM)
 
