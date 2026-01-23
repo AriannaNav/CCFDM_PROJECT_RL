@@ -10,7 +10,7 @@ import torch
 
 
 
-def get_device(requested: str = "auto") -> torch.device:
+def get_device(requested):
     
     #requested: "auto" | "cpu" | "mps"
 
@@ -31,14 +31,14 @@ def get_device(requested: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
-def device_info(device: torch.device) -> str:
+def device_info(device):
     if device.type == "mps":
         return "mps (Apple Silicon GPU)"
     return "cpu"
 
 
 # Reproducibility / seeding
-def set_seed(seed: int,deterministic: bool = False,device: Optional[torch.device] = None,) -> None:
+def set_seed(seed,deterministic,device,) :
 
     seed = int(seed)
 
@@ -64,10 +64,10 @@ def set_seed(seed: int,deterministic: bool = False,device: Optional[torch.device
     _ = device
 
 def soft_update(
-    target: torch.nn.Module,
-    source: torch.nn.Module,
-    tau: float,
-) -> None:
+    target,
+    source,
+    tau,
+) :
     """
     target = tau * source + (1 - tau) * target
     """
@@ -77,8 +77,8 @@ def soft_update(
             tp.data.add_(tau * sp.data)
 
 def hard_update(
-    target: torch.nn.Module,
-    source: torch.nn.Module,
-) -> None:
+    target,
+    source,
+) :
     target.load_state_dict(source.state_dict())
 

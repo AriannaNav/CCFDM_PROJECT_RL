@@ -21,7 +21,7 @@ CCFDM_PROJECT_RL/
 │
 ├── make_env.py         # factory ambienti
 ├── dmc.py              # wrapper DeepMind Control Suite
-├── minigrid.py         # wrapper MiniGrid
+├── minigrid_env.py         # wrapper MiniGrid
 │
 ├── utils.py            # seed, device, helper comuni
 ├── logger.py           # logging centralizzato
