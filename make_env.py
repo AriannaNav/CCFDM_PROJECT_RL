@@ -39,7 +39,7 @@ class UnifiedEnv:
     Obs is uint8 CHW with frame stacking: (3*frame_stack, H, W)
     """
 
-    def __init__(self, env: Any):
+    def __init__(self, env):
         self._env = env
 
         self.obs_shape: Tuple[int, int, int] = tuple(env.obs_shape)  # (C, H, W)
@@ -49,19 +49,19 @@ class UnifiedEnv:
 
         self.max_episode_steps: Optional[int] = getattr(env, "max_episode_steps", None)
 
-    def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self):
         return self._env.reset()
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action):
         # passthrough: dmc.py and minigrid_env.py return (obs, reward, terminated, truncated, info)
         return self._env.step(action)
 
-    def close(self) -> None:
+    def close(self):
         if hasattr(self._env, "close"):
             self._env.close()
 
 
-def make_env(spec: EnvSpec) -> UnifiedEnv:
+def make_env(spec):
     name = spec.name.lower().strip()
 
     if name == "dmc":
