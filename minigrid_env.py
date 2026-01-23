@@ -7,7 +7,7 @@ from minigrid.wrappers import RGBImgObsWrapper
 from PIL import Image
 
 
-def _to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
+def to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
 
     if obs_rgb_hwc.dtype != np.uint8:
         obs_rgb_hwc = obs_rgb_hwc.astype(np.uint8)
@@ -112,7 +112,7 @@ class MiniGridContinuousWrapper:
         obs, info = self._env.reset(seed=self.seed)
 
         img = obs["image"]  
-        frame = _to_uint8_chw_rgb(img, self.image_size)
+        frame = to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.reset(frame)
 
         return stacked, info
@@ -147,7 +147,7 @@ class MiniGridContinuousWrapper:
 
         assert last_obs is not None
         img = last_obs["image"]  # HWC
-        frame = _to_uint8_chw_rgb(img, self.image_size)
+        frame = to_uint8_chw_rgb(img, self.image_size)
         stacked = self._fs.push(frame)
 
         return stacked, total_reward, done, info
