@@ -30,26 +30,31 @@ class EnvSpec:
 
 
 class UnifiedEnv:
-    #    Unified wrapper that guarantees a Gymnasium-like API and shared attributes:
-    #   - reset() -> (obs, info)
-    #   - step() -> (obs, reward, terminated, truncated, info)
-    #   Obs is uint8 CHW with frame stacking: (3*frame_stack, H, W)
-    
+    """
+    Unified wrapper that guarantees a consistent API across envs:
+
+      reset() -> (obs, info)
+      step(a) -> (obs, reward, done, info)
+
+    Obs is uint8 CHW with frame stacking: (3*frame_stack, H, W)
+    """
+
     def __init__(self, env: Any):
         self._env = env
 
         self.obs_shape: Tuple[int, int, int] = tuple(env.obs_shape)  # (C, H, W)
+
         self.action_shape: Tuple[int, ...] = tuple(env.action_shape)
         self.action_low: np.ndarray = np.asarray(env.action_low, dtype=np.float32)
         self.action_high: np.ndarray = np.asarray(env.action_high, dtype=np.float32)
 
         self.max_episode_steps: Optional[int] = getattr(env, "max_episode_steps", None)
 
- 
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         return self._env.reset()
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
+        # passthrough: dmc.py and minigrid_env.py already return (obs, reward, done, info)
         return self._env.step(action)
 
     def close(self) -> None:
@@ -63,6 +68,7 @@ def make_env(spec: EnvSpec) -> UnifiedEnv:
     if name == "dmc":
         if not spec.domain or not spec.task:
             raise ValueError("For DMC you must provide spec.domain and spec.task.")
+
         env = make_dmc_env(
             domain=spec.domain,
             task=spec.task,
@@ -78,6 +84,7 @@ def make_env(spec: EnvSpec) -> UnifiedEnv:
     if name == "minigrid":
         if not spec.env_id:
             raise ValueError("For MiniGrid you must provide spec.env_id.")
+
         env = make_minigrid_env(
             env_id=spec.env_id,
             image_size=spec.image_size,
