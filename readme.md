@@ -1,35 +1,5 @@
-# CCFDM – Curiosity Contrastive Forward Dynamics Model (SAC)
 
-Riproduzione **fedele, modulare e sperimentale** del paper  
-**“Curiosity Contrastive Forward Dynamics Model (CCFDM)”**,  
-implementata in **PyTorch**, utilizzando **Soft Actor-Critic (SAC)** come algoritmo di Reinforcement Learning di base  
-(**NON PPO**).
 
-Il progetto è pensato come **codice di ricerca**, non come libreria:
-- aderente all’algoritmo del paper
-- facile da leggere e modificare
-- adatto a esperimenti, confronti e ablation study
-- capace di generalizzare su ambienti di complessità crescente
-
----
-
-## 🎯 Obiettivi del progetto
-
-- Riprodurre **esattamente l’Algorithm 1 del paper CCFDM**
-- Separare chiaramente:
-  - algoritmo
-  - modelli
-  - loss
-  - ambienti
-- Supportare **ambienti diversi** con **la stessa architettura**
-  - GridWorld / MiniGrid
-  - DeepMind Control Suite (DMC)
-- Permettere:
-  - confronti tra loss contrastive
-  - studio della curiosità
-  - analisi di sample efficiency e stabilità
-
----
 
 ## 📁 Struttura del progetto (flat)
 
@@ -156,60 +126,6 @@ Il FDM:
 
 ---
 
-## 📦 Dati
-
-### `data.py`
-
-Responsabilità:
-- replay buffer unico per tutti gli ambienti
-- supporto a:
-- immagini
-- azioni continue
-- reward
-- next observation
-- supporto batch per contrastive learning:
-- anchor
-- positive
-- negative (implicitamente il batch)
-
-⚠️ **Nessuna logica di training qui dentro**
-
----
-
-## 🌍 Ambienti
-
-### `make_env.py`
-
-Factory centrale degli ambienti.
-
-Garantisce che **tutti gli env restituiscano la stessa interfaccia**:
-- `obs`: `uint8 [C, 84, 84]`
-- `action`: `float32`
-- `reward`: `float`
-- `done`: `bool`
-
-Questo consente di:
-- cambiare ambiente **senza toccare agent o encoder**
-- usare la stessa architettura su task diversi
-
----
-
-### `dmc.py`
-Wrapper per:
-- DeepMind Control Suite
-- osservazioni pixel
-- azioni continue
-
----
-
-### `minigrid.py`
-Wrapper per:
-- MiniGrid
-- azioni discrete mappate in continuo
-- rendering RGB
-- frame stacking
-
----
 
 ## 📉 Loss e Curiosità
 
@@ -231,13 +147,6 @@ Responsabilità:
 ---
 
 ## 🛠 Utility
-
-### `utils.py`
-
-File unico di utilità:
-- selezione device (`cpu` / `mps` / auto per Mac M4)
-- seeding riproducibile (Python, NumPy, PyTorch)
-- modalità deterministica opzionale
 
 ---
 
