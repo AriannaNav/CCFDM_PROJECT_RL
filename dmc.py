@@ -9,7 +9,7 @@ from PIL import Image
 
 
 
-def _resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
+def resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
     if img_hwc.dtype != np.uint8:
         img_hwc = img_hwc.astype(np.uint8)
 
@@ -101,7 +101,7 @@ class DMCEnv:
         obs = ts.observation
         img = obs["pixels"] if isinstance(obs, dict) else obs  
 
-        frame = _resize_to_uint8_chw(img, self.image_size)
+        frame = resize_to_uint8_chw(img, self.image_size)
         stacked = self._fs.reset(frame)
         return stacked, {}
 
@@ -132,7 +132,7 @@ class DMCEnv:
         assert ts is not None
         obs = ts.observation
         img = obs["pixels"] if isinstance(obs, dict) else obs  # <-- FIX
-        frame = _resize_to_uint8_chw(img, self.image_size)
+        frame = resize_to_uint8_chw(img, self.image_size)
         stacked = self._fs.push(frame)
 
         return stacked, total_reward, done, info
