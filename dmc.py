@@ -7,7 +7,10 @@ from dm_control import suite
 from dm_control.suite.wrappers import pixels
 from PIL import Image
 
-
+#this module is needed to take a task from the DeepMind Control Suite (DMC) 
+#and wrap it into an environment compatible with standard RL workflows.
+#Infact now it produces observations as stacked frames of resized images,
+#and handles action repeats, seeding, and episode length limits.
 
 def resize_to_uint8_chw(img_hwc: np.ndarray, image_size: int) -> np.ndarray:
     if img_hwc.dtype != np.uint8:
