@@ -6,7 +6,10 @@ import torch
 
 
 def random_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
-  
+    """
+    imgs: (B, C, H, W)
+    returns: (B, C, out_size, out_size)
+    """
     b, c, h, w = imgs.shape
     if h == out_size and w == out_size:
         return imgs
@@ -28,7 +31,10 @@ def random_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
 
 
 def center_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
-  
+    """
+    imgs: (B, C, H, W)
+    returns: (B, C, out_size, out_size)
+    """
     b, c, h, w = imgs.shape
     if h == out_size and w == out_size:
         return imgs
@@ -41,6 +47,10 @@ def center_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
 
 
 def to_torch_obs(obs_u8: np.ndarray, device: torch.device) -> torch.Tensor:
+    """
+    obs_u8: uint8 tensor in [0,255], shape (B,C,H,W) or (C,H,W)
+    returns float32 in [0,1]
+    """
     t = torch.as_tensor(obs_u8, device=device).float()
     return t / 255.0
 
@@ -56,7 +66,6 @@ class ReplayBatch:
 
 
 class ReplayBuffer:
-
     def __init__(
         self,
         obs_shape: Tuple[int, int, int],     # (C,H,W)
@@ -82,6 +91,10 @@ class ReplayBuffer:
         self._idx = 0
         self._full = False
 
+        # quick reference shapes for validation
+        self._obs_shape = (c, h, w)
+        self._action_shape = tuple(action_shape)
+
     def __len__(self) -> int:
         return self.size
 
@@ -89,23 +102,36 @@ class ReplayBuffer:
     def size(self) -> int:
         return self.capacity if self._full else self._idx
 
-
     def clear(self) -> None:
         self._idx = 0
         self._full = False
 
     def add(
         self,
-        obs: np.ndarray,         # (C,H,W) uint8
-        action: np.ndarray,      # (A,) float32
+        obs: np.ndarray,             # (C,H,W) uint8
+        action: np.ndarray,          # (A,) float32
         reward: float,
-        next_obs: np.ndarray,    # (C,H,W) uint8
-        done: bool,
+        next_obs: np.ndarray,        # (C,H,W) uint8
+        terminated: bool,
+        truncated: bool,
     ) -> None:
+       
+        # --- sanity checks: catch env mismatch early (HWC, float, etc.)
+        if obs.dtype != np.uint8 or next_obs.dtype != np.uint8:
+            raise TypeError(f"obs/next_obs must be uint8. Got {obs.dtype=} {next_obs.dtype=}")
+        if obs.shape != self._obs_shape or next_obs.shape != self._obs_shape:
+            raise ValueError(f"obs shape mismatch. Expected {self._obs_shape}, got {obs.shape=} {next_obs.shape=}")
+
+        action = np.asarray(action, dtype=np.float32)
+        if action.shape != self._action_shape:
+            raise ValueError(f"action shape mismatch. Expected {self._action_shape}, got {action.shape}")
+
+        done = bool(terminated or truncated)
+
         np.copyto(self._obses[self._idx], obs)
         np.copyto(self._next_obses[self._idx], next_obs)
-
         np.copyto(self._actions[self._idx], action)
+
         self._rewards[self._idx, 0] = float(reward)
         self._not_dones[self._idx, 0] = 0.0 if done else 1.0
 
@@ -131,17 +157,13 @@ class ReplayBuffer:
         obs = to_torch_obs(obs_u8, self.device)
         next_obs = to_torch_obs(next_obs_u8, self.device)
 
-        action = torch.as_tensor(self._actions[idxs], device=self.device)
-        reward = torch.as_tensor(self._rewards[idxs], device=self.device)
-        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device)
+        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
+        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
+        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
-        return ReplayBatch(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, not_done=not_done
-        )
+        return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
     def sample_no_aug(self) -> ReplayBatch:
-       
         idxs = self.sample_idxs()
 
         obs_u8 = center_crop(self._obses[idxs], self.image_size)
@@ -150,38 +172,43 @@ class ReplayBuffer:
         obs = to_torch_obs(obs_u8, self.device)
         next_obs = to_torch_obs(next_u8, self.device)
 
-        action = torch.as_tensor(self._actions[idxs], device=self.device)
-        reward = torch.as_tensor(self._rewards[idxs], device=self.device)
-        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device)
+        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
+        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
+        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
-        return ReplayBatch(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, not_done=not_done
-        )
+        return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
-    def sample_cpc(self) -> ReplayBatch:
-       
+    def sample_cpc(self) -> ReplayBatch: #contrsastive predictive coding
+        """
+        Returns:
+          obs = obs_anchor (aug view)
+          next_obs = next_obs (aug view)
+          cpc_kwargs = { "obs_pos": second aug view of obs }
+        """
         idxs = self.sample_idxs()
 
-        obs_u8 = self._obses[idxs]          # (B,C,H,W)
+        obs_u8 = self._obses[idxs]            # (B,C,H,W)
         next_obs_u8 = self._next_obses[idxs]
 
         obs_anchor_u8 = random_crop(obs_u8, self.image_size)
         obs_pos_u8 = random_crop(obs_u8, self.image_size)
-        next_obs_crop_u8 = random_crop(next_obs_u8, self.image_size)
+        next_obs_u8 = random_crop(next_obs_u8, self.image_size)
 
         obs_anchor = to_torch_obs(obs_anchor_u8, self.device)
         obs_pos = to_torch_obs(obs_pos_u8, self.device)
-        next_obs = to_torch_obs(next_obs_crop_u8, self.device)
+        next_obs = to_torch_obs(next_obs_u8, self.device)
 
-        action = torch.as_tensor(self._actions[idxs], device=self.device)
-        reward = torch.as_tensor(self._rewards[idxs], device=self.device)
-        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device)
+        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
+        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
+        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
-        cpc_kwargs = {"obs_anchor": obs_anchor, "obs_pos": obs_pos}
+        cpc_kwargs = {"obs_pos": obs_pos}
 
         return ReplayBatch(
-            obs=obs_anchor, action=action, reward=reward,
-            next_obs=next_obs, not_done=not_done,
-            cpc_kwargs=cpc_kwargs
+            obs=obs_anchor,
+            action=action,
+            reward=reward,
+            next_obs=next_obs,
+            not_done=not_done,
+            cpc_kwargs=cpc_kwargs,
         )
