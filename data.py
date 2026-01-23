@@ -1,4 +1,3 @@
-# data.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional
@@ -90,8 +89,6 @@ class ReplayBuffer:
     def size(self) -> int:
         return self.capacity if self._full else self._idx
 
-    def can_sample(self) -> bool:
-        return self.size >= self.batch_size
 
     def clear(self) -> None:
         self._idx = 0
