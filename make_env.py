@@ -1,8 +1,8 @@
+# make_env.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any
-
 import numpy as np
 
 from dmc import make_dmc_env
@@ -31,10 +31,10 @@ class EnvSpec:
 
 class UnifiedEnv:
     """
-    Unified wrapper that guarantees a consistent API across envs:
+    Unified wrapper that guarantees a consistent Gymnasium-like API across envs:
 
       reset() -> (obs, info)
-      step(a) -> (obs, reward, done, info)
+      step(a) -> (obs, reward, terminated, truncated, info)
 
     Obs is uint8 CHW with frame stacking: (3*frame_stack, H, W)
     """
@@ -43,7 +43,6 @@ class UnifiedEnv:
         self._env = env
 
         self.obs_shape: Tuple[int, int, int] = tuple(env.obs_shape)  # (C, H, W)
-
         self.action_shape: Tuple[int, ...] = tuple(env.action_shape)
         self.action_low: np.ndarray = np.asarray(env.action_low, dtype=np.float32)
         self.action_high: np.ndarray = np.asarray(env.action_high, dtype=np.float32)
@@ -53,8 +52,8 @@ class UnifiedEnv:
     def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
         return self._env.reset()
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-        # passthrough: dmc.py and minigrid_env.py already return (obs, reward, done, info)
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+        # passthrough: dmc.py and minigrid_env.py return (obs, reward, terminated, truncated, info)
         return self._env.step(action)
 
     def close(self) -> None:
