@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 
-def random_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
+def random_crop(imgs, out_size):
     """
     imgs: (B, C, H, W)
     returns: (B, C, out_size, out_size)
@@ -30,7 +30,7 @@ def random_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
     return out
 
 
-def center_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
+def center_crop(imgs, out_size):
     """
     imgs: (B, C, H, W)
     returns: (B, C, out_size, out_size)
@@ -46,7 +46,7 @@ def center_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
     return imgs[:, :, y0:y0 + out_size, x0:x0 + out_size]
 
 
-def to_torch_obs(obs_u8: np.ndarray, device: torch.device) -> torch.Tensor:
+def to_torch_obs(obs_u8, device):
     """
     obs_u8: uint8 tensor in [0,255], shape (B,C,H,W) or (C,H,W)
     returns float32 in [0,1]
@@ -68,12 +68,12 @@ class ReplayBatch:
 class ReplayBuffer:
     def __init__(
         self,
-        obs_shape: Tuple[int, int, int],     # (C,H,W)
-        action_shape: Tuple[int, ...],       # (A,)
-        capacity: int,
-        batch_size: int,
-        device: torch.device,
-        image_size: int = 84,                # crop size used in sample_cpc / sample_no_aug
+        obs_shape,     # (C,H,W)
+        action_shape,       # (A,)
+        capacity,
+        batch_size,
+        device,
+        image_size,                # crop size used in sample_cpc / sample_no_aug
     ):
         self.capacity = int(capacity)
         self.batch_size = int(batch_size)
@@ -95,26 +95,26 @@ class ReplayBuffer:
         self._obs_shape = (c, h, w)
         self._action_shape = tuple(action_shape)
 
-    def __len__(self) -> int:
+    def __len__(self):
         return self.size
 
     @property
-    def size(self) -> int:
+    def size(self):
         return self.capacity if self._full else self._idx
 
-    def clear(self) -> None:
+    def clear(self):
         self._idx = 0
         self._full = False
 
     def add(
         self,
-        obs: np.ndarray,             # (C,H,W) uint8
-        action: np.ndarray,          # (A,) float32
-        reward: float,
-        next_obs: np.ndarray,        # (C,H,W) uint8
-        terminated: bool,
-        truncated: bool,
-    ) -> None:
+        obs,             # (C,H,W) uint8
+        action,          # (A,) float32
+        reward,
+        next_obs,        # (C,H,W) uint8
+        terminated,
+        truncated,
+    ) :
        
         # --- sanity checks: catch env mismatch early (HWC, float, etc.)
         if obs.dtype != np.uint8 or next_obs.dtype != np.uint8:
@@ -139,7 +139,7 @@ class ReplayBuffer:
         if self._idx == 0:
             self._full = True
 
-    def sample_idxs(self) -> np.ndarray:
+    def sample_idxs(self):
         n = self.capacity if self._full else self._idx
         if n < self.batch_size:
             raise RuntimeError(
@@ -148,7 +148,7 @@ class ReplayBuffer:
             )
         return np.random.randint(0, n, size=self.batch_size)
 
-    def sample(self) -> ReplayBatch:
+    def sample(self):
         idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]
@@ -163,7 +163,7 @@ class ReplayBuffer:
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
-    def sample_no_aug(self) -> ReplayBatch:
+    def sample_no_aug(self):
         idxs = self.sample_idxs()
 
         obs_u8 = center_crop(self._obses[idxs], self.image_size)
@@ -178,7 +178,7 @@ class ReplayBuffer:
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
-    def sample_cpc(self) -> ReplayBatch: #contrsastive predictive coding
+    def sample_cpc(self): #contrsastive predictive coding
         """
         Returns:
           obs = obs_anchor (aug view)
