@@ -41,7 +41,7 @@ def center_crop(imgs: np.ndarray, out_size: int) -> np.ndarray:
     return imgs[:, :, y0:y0 + out_size, x0:x0 + out_size]
 
 
-def _to_torch_obs(obs_u8: np.ndarray, device: torch.device) -> torch.Tensor:
+def to_torch_obs(obs_u8: np.ndarray, device: torch.device) -> torch.Tensor:
     t = torch.as_tensor(obs_u8, device=device).float()
     return t / 255.0
 
@@ -116,7 +116,7 @@ class ReplayBuffer:
         if self._idx == 0:
             self._full = True
 
-    def _sample_idxs(self) -> np.ndarray:
+    def sample_idxs(self) -> np.ndarray:
         n = self.capacity if self._full else self._idx
         if n < self.batch_size:
             raise RuntimeError(
@@ -126,13 +126,13 @@ class ReplayBuffer:
         return np.random.randint(0, n, size=self.batch_size)
 
     def sample(self) -> ReplayBatch:
-        idxs = self._sample_idxs()
+        idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]
         next_obs_u8 = self._next_obses[idxs]
 
-        obs = _to_torch_obs(obs_u8, self.device)
-        next_obs = _to_torch_obs(next_obs_u8, self.device)
+        obs = to_torch_obs(obs_u8, self.device)
+        next_obs = to_torch_obs(next_obs_u8, self.device)
 
         action = torch.as_tensor(self._actions[idxs], device=self.device)
         reward = torch.as_tensor(self._rewards[idxs], device=self.device)
@@ -145,13 +145,13 @@ class ReplayBuffer:
 
     def sample_no_aug(self) -> ReplayBatch:
        
-        idxs = self._sample_idxs()
+        idxs = self.sample_idxs()
 
         obs_u8 = center_crop(self._obses[idxs], self.image_size)
         next_u8 = center_crop(self._next_obses[idxs], self.image_size)
 
-        obs = _to_torch_obs(obs_u8, self.device)
-        next_obs = _to_torch_obs(next_u8, self.device)
+        obs = to_torch_obs(obs_u8, self.device)
+        next_obs = to_torch_obs(next_u8, self.device)
 
         action = torch.as_tensor(self._actions[idxs], device=self.device)
         reward = torch.as_tensor(self._rewards[idxs], device=self.device)
@@ -164,7 +164,7 @@ class ReplayBuffer:
 
     def sample_cpc(self) -> ReplayBatch:
        
-        idxs = self._sample_idxs()
+        idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]          # (B,C,H,W)
         next_obs_u8 = self._next_obses[idxs]
@@ -173,9 +173,9 @@ class ReplayBuffer:
         obs_pos_u8 = random_crop(obs_u8, self.image_size)
         next_obs_crop_u8 = random_crop(next_obs_u8, self.image_size)
 
-        obs_anchor = _to_torch_obs(obs_anchor_u8, self.device)
-        obs_pos = _to_torch_obs(obs_pos_u8, self.device)
-        next_obs = _to_torch_obs(next_obs_crop_u8, self.device)
+        obs_anchor = to_torch_obs(obs_anchor_u8, self.device)
+        obs_pos = to_torch_obs(obs_pos_u8, self.device)
+        next_obs = to_torch_obs(next_obs_crop_u8, self.device)
 
         action = torch.as_tensor(self._actions[idxs], device=self.device)
         reward = torch.as_tensor(self._rewards[idxs], device=self.device)
