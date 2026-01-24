@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 import numpy as np
 
 from dmc import make_dmc_env
-from minigrid_env import make_minigrid_env
 
 
 @dataclass
@@ -81,6 +80,7 @@ def make_env(spec):
         return UnifiedEnv(env)
 
     if name == "minigrid":
+        from minigrid_env import make_minigrid_env
         if not spec.env_id:
             raise ValueError("For MiniGrid you must provide spec.env_id.")
 
