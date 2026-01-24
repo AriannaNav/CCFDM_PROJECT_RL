@@ -83,11 +83,12 @@ def random_shift(imgs, pad: int = 4):
 
 def to_torch_obs(obs_u8, device):
     """
-    obs_u8: uint8 tensor in [0,255], shape (B,C,H,W) or (C,H,W)
-    returns float32 in [0,1]
+    obs_u8: np.uint8 array (B,C,H,W) or (C,H,W)
+    returns float32 in [0,1] on device
     """
-    t = torch.as_tensor(obs_u8, device=device).float()
-    return t / 255.0
+    obs_u8 = np.ascontiguousarray(obs_u8)               
+    t = torch.from_numpy(obs_u8).to(device=device)      
+    return t.float().div_(255.0)
 
 
 @dataclass
