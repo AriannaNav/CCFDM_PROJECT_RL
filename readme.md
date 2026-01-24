@@ -42,72 +42,109 @@ The framework combines:
 └── logger.py            # logging utilities
 
 
-⸻
+Training corto (20k step)
 
-3. Training
-
-DeepMind Control Suite
-
-python main.py \
+Serve solo a verificare che tutto funzioni.
+python train_ccfdm.py \
   --env dmc \
   --dmc_domain walker \
   --dmc_task walk \
   --seed 1 \
+  --device mps \
+  --total_steps 20000 \
+  --init_random_steps 2000 \
+  --update_after 1000 \
+  --eval_every 5000 \
+  --eval_episodes 5
+
+📁 Output atteso:
+models/ccfdm/dmc_walker_walk/seed_1/
+  ├── last.pt
+  ├── best.pt
+logs/ccfdm/dmc_walker_walk/seed_1/
+Se non vedi errori e vengono salvati i file → sei a posto.
+
+
+3️⃣ Training “vero” (paper-like)
+python train_ccfdm.py \
+  --env dmc \
+  --dmc_domain walker \
+  --dmc_task walk \
+  --seed 1 \
+  --device mps \
   --total_steps 500000 \
+  --batch_size 512 \
   --eval_every 10000 \
   --eval_episodes 10 \
-  --batch_size 128
+  --save_every 10000
 
-Other supported tasks:
-	•	finger spin
+
+💡 Altri task DMC validi:
 	•	cartpole swingup
+	•	finger spin
 	•	cheetah run
 	•	ball_in_cup catch
 	•	reacher easy
 
-MiniGrid
+4️⃣ Evaluation (policy deterministica)
 
-python main.py \
-  --env minigrid \
-  --minigrid_id MiniGrid-Empty-8x8-v0 \
-  --seed 1 \
-  --total_steps 200000
+Metodo diretto
+python eval.py \
+  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
+  --episodes 10 \
+  --device mps
+
+Output:
+	•	mean return
+	•	std return
+
+5️⃣ Rendering / Video
+python video.py \
+  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
+  --out_dir videos \
+  --episodes 3 \
+  --fps 30 \
+  --device mps
+
+📁 Output:
+videos/
+  └── dmc_walker_walk_seed1_ep0.mp4
+
+Se .mp4 non viene scritto:
+
+pip install imageio-ffmpeg
+
+6️⃣ Tutto da main.py (come volevi tu)
+
+✔️ Eval + Render insieme
+python main.py --eval --render \
+  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
+  --device mps
+
+✔️ Modalità subcommand (più pulita)
+python main.py run --do_eval --do_video \
+  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
+  --device mps
 
 
 ⸻
 
-4. Evaluation
-
-To evaluate a trained agent:
-
-python eval.py \
-  --model_path models/ccfdm/<env>/<seed>/best.pt
-
-5. Plotting Learning Curves
-
-To reproduce evaluation curves (Fig. 5–style):
+7️⃣ Plot delle curve (stile Fig.5)
 python plots.py \
-  --logdir logs/ccfdm \
-  --env walker_walk
+  --log_dir logs/ccfdm/dmc_walker_walk/seed_1
 
-The script aggregates multiple seeds and plots evaluation return vs environment steps.
+Output:
+logs/.../fig5_eval_curve.png
 
-6. Video Rendering
+8️⃣ Workflow consigliato (ordine giusto)
+	1.	✅ Training corto (20k) → verifica che tutto gira
+	2.	🚀 Training lungo (500k)
+	3.	📊 Eval (eval.py)
+	4.	🎥 Video (video.py)
+	5.	📈 Plot (plots.py)
 
-To render a rollout from a trained agent:
-python video.py \
-  --model_path models/ccfdm/<env>/<seed>/best.pt \
-  --output video.mp4
-  The video is generated using the deterministic policy (no exploration noise).
-
-8. Reproducibility
-	•	All experiments are seed-controlled
-	•	Best and last checkpoints are saved automatically
-	•	Configuration is stored alongside each run
-
-
-## Cosa Installare
-- pip install gymnasium minigrid
-- pip install dm_control
-- pip install pillow
-- pip install opencv-python
+9️⃣ Note importanti (da ricercatrice a ricercatrice)
+	•	L’intrinsic reward è attiva solo in training
+	•	Eval e video usano policy deterministica
+	•	Data augmentation non è più un no-op su DMC 84×84
+	•	CCFDM è paper-faithful (Eq.8 + Eq.9, decay singolo)
