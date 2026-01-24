@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional
 import numpy as np
 import torch
 
@@ -46,6 +46,40 @@ def center_crop(imgs, out_size):
     return imgs[:, :, y0:y0 + out_size, x0:x0 + out_size]
 
 
+def random_shift(imgs, pad: int = 4):
+    """
+    DrQ-style random shift:
+      - pad with edge values
+      - random crop back to original HxW
+    Works even when H=W=out_size (e.g. 84x84), unlike random_crop(84->84) which is a no-op.
+
+    imgs: (B, C, H, W) uint8
+    returns: (B, C, H, W) uint8
+    """
+    b, c, h, w = imgs.shape
+    if pad <= 0:
+        return imgs
+
+    p = int(pad)
+    imgs_pad = np.pad(
+        imgs,
+        pad_width=((0, 0), (0, 0), (p, p), (p, p)),
+        mode="edge",
+    )
+
+    # choose top-left corner in [0..2p]
+    max_off = 2 * p
+    ys = np.random.randint(0, max_off + 1, size=b)
+    xs = np.random.randint(0, max_off + 1, size=b)
+
+    out = np.empty((b, c, h, w), dtype=imgs.dtype)
+    for i in range(b):
+        y = ys[i]
+        x = xs[i]
+        out[i] = imgs_pad[i, :, y:y + h, x:x + w]
+    return out
+
+
 def to_torch_obs(obs_u8, device):
     """
     obs_u8: uint8 tensor in [0,255], shape (B,C,H,W) or (C,H,W)
@@ -68,17 +102,19 @@ class ReplayBatch:
 class ReplayBuffer:
     def __init__(
         self,
-        obs_shape,     # (C,H,W)
-        action_shape,       # (A,)
+        obs_shape,            # (C,H,W)
+        action_shape,         # (A,)
         capacity,
         batch_size,
         device,
-        image_size,                # crop size used in sample_cpc / sample_no_aug
+        image_size,           # kept for compatibility; crop size if using random_crop/center_crop
+        aug_pad: int = 4,     # NEW: pad for DrQ-style random shift
     ):
         self.capacity = int(capacity)
         self.batch_size = int(batch_size)
         self.device = device
         self.image_size = int(image_size)
+        self.aug_pad = int(aug_pad)
 
         c, h, w = obs_shape
         self._obses = np.empty((self.capacity, c, h, w), dtype=np.uint8)
@@ -91,7 +127,6 @@ class ReplayBuffer:
         self._idx = 0
         self._full = False
 
-        # quick reference shapes for validation
         self._obs_shape = (c, h, w)
         self._action_shape = tuple(action_shape)
 
@@ -114,9 +149,7 @@ class ReplayBuffer:
         next_obs,        # (C,H,W) uint8
         terminated,
         truncated,
-    ) :
-       
-        # --- sanity checks: catch env mismatch early (HWC, float, etc.)
+    ):
         if obs.dtype != np.uint8 or next_obs.dtype != np.uint8:
             raise TypeError(f"obs/next_obs must be uint8. Got {obs.dtype=} {next_obs.dtype=}")
         if obs.shape != self._obs_shape or next_obs.shape != self._obs_shape:
@@ -149,10 +182,18 @@ class ReplayBuffer:
         return np.random.randint(0, n, size=self.batch_size)
 
     def sample(self):
+        """
+        Standard SAC batch.
+        NEW: applies DrQ-style random shift augmentation to obs and next_obs.
+        """
         idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]
         next_obs_u8 = self._next_obses[idxs]
+
+        # NEW: effective augmentation even if frames are already 84x84
+        obs_u8 = random_shift(obs_u8, pad=self.aug_pad)
+        next_obs_u8 = random_shift(next_obs_u8, pad=self.aug_pad)
 
         obs = to_torch_obs(obs_u8, self.device)
         next_obs = to_torch_obs(next_obs_u8, self.device)
@@ -164,6 +205,9 @@ class ReplayBuffer:
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
     def sample_no_aug(self):
+        """
+        Center-crop + no stochastic augmentation (useful for evaluation-like batches).
+        """
         idxs = self.sample_idxs()
 
         obs_u8 = center_crop(self._obses[idxs], self.image_size)
@@ -178,21 +222,25 @@ class ReplayBuffer:
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
-    def sample_cpc(self): #contrsastive predictive coding
+    def sample_cpc(self):
         """
-        Returns:
-          obs = obs_anchor (aug view)
-          next_obs = next_obs (aug view)
-          cpc_kwargs = { "obs_pos": second aug view of obs }
+        Contrastive batch:
+          - obs = obs_anchor (aug view)
+          - next_obs = next_obs (aug view)
+          - cpc_kwargs = { "obs_pos": second aug view of obs }
+        NEW: uses DrQ-style random shift to ensure augmentation is never a no-op on 84x84.
         """
         idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]            # (B,C,H,W)
         next_obs_u8 = self._next_obses[idxs]
 
-        obs_anchor_u8 = random_crop(obs_u8, self.image_size)
-        obs_pos_u8 = random_crop(obs_u8, self.image_size)
-        next_obs_u8 = random_crop(next_obs_u8, self.image_size)
+        # two different augmented views of current obs
+        obs_anchor_u8 = random_shift(obs_u8, pad=self.aug_pad)
+        obs_pos_u8 = random_shift(obs_u8, pad=self.aug_pad)
+
+        # augmented next obs
+        next_obs_u8 = random_shift(next_obs_u8, pad=self.aug_pad)
 
         obs_anchor = to_torch_obs(obs_anchor_u8, self.device)
         obs_pos = to_torch_obs(obs_pos_u8, self.device)

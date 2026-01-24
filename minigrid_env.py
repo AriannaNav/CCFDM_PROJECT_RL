@@ -9,7 +9,7 @@ from minigrid.wrappers import RGBImgObsWrapper
 from PIL import Image
 
 
-def to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
+def to_uint8_chw_rgb(obs_rgb_hwc, image_size):
     """
     Input: HWC uint8 (or castable)
     Output: CHW uint8 resized to (image_size, image_size)
@@ -25,26 +25,26 @@ def to_uint8_chw_rgb(obs_rgb_hwc: np.ndarray, image_size: int) -> np.ndarray:
 
 
 class FrameStack:
-    def __init__(self, k: int, obs_shape_chw: Tuple[int, int, int]):
+    def __init__(self, k, obs_shape_chw):
         self.k = int(k)
         c, h, w = obs_shape_chw
         self._frames = np.zeros((self.k, c, h, w), dtype=np.uint8)
         self._filled = False
 
-    def reset(self, first_frame: np.ndarray) -> np.ndarray:
+    def reset(self, first_frame):
         for i in range(self.k):
             self._frames[i] = first_frame
         self._filled = True
         return self.get()
 
-    def push(self, frame: np.ndarray) -> np.ndarray:
+    def push(self, frame):
         if not self._filled:
             return self.reset(frame)
         self._frames[:-1] = self._frames[1:]
         self._frames[-1] = frame
         return self.get()
 
-    def get(self) -> np.ndarray:
+    def get(self) :
         # (k, C, H, W) -> (k*C, H, W)
         return self._frames.reshape(
             self.k * self._frames.shape[1],
@@ -98,7 +98,7 @@ class MiniGridContinuousWrapper:
         self._t = 0
         self._episode_idx = 0
 
-    def continuous_to_discrete(self, action: Union[float, int, np.ndarray]) -> int:
+    def continuous_to_discrete(self, action):
         if isinstance(action, np.ndarray):
             a = float(action.reshape(-1)[0]) if action.size > 0 else 0.0
         else:
@@ -113,7 +113,7 @@ class MiniGridContinuousWrapper:
         idx = int(np.round(scaled))
         return max(0, min(self._n_actions - 1, idx))
 
-    def reset(self) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def reset(self):
         self._t = 0
         seed = self.seed + self._episode_idx
         self._episode_idx += 1
@@ -124,7 +124,7 @@ class MiniGridContinuousWrapper:
         stacked = self._fs.reset(frame)
         return stacked, info
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action) :
         a_discrete = self.continuous_to_discrete(action)
 
         total_reward = 0.0
@@ -159,19 +159,19 @@ class MiniGridContinuousWrapper:
 
         return stacked, total_reward, terminated, truncated, info
 
-    def close(self) -> None:
+    def close(self) :
         if hasattr(self._env, "close"):
             self._env.close()
 
 
 def make_minigrid_env(
-    env_id: str,
-    image_size: int = 84,
-    frame_stack: int = 3,
-    action_repeat: int = 1,
-    seed: int = 1,
-    max_episode_steps: Optional[int] = None,
-) -> MiniGridContinuousWrapper:
+    env_id,
+    image_size = 84,
+    frame_stack = 3,
+    action_repeat = 1,
+    seed= 1,
+    max_episode_steps = None,
+):
     return MiniGridContinuousWrapper(
         env_id=env_id,
         image_size=image_size,

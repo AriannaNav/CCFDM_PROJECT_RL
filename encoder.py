@@ -1,100 +1,106 @@
+from __future__ import annotations
+from typing import Dict, Type
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-#encoder.py 
-#ref https://github.com/thanhkaist/CCFDM1/blob/main/encoder.py
-# encoder.py
-# Macro-TODO (Encoder only: PixelEncoder + IdentityEncoder + factory)
 
-from __future__ import annotations
+@torch.no_grad()
+def copy_weights(src, trg):
+    assert type(src) is type(trg), f"Type mismatch: {type(src)} vs {type(trg)}"
+    trg.weight.copy_(src.weight)
+    if trg.bias is not None and src.bias is not None:
+        trg.bias.copy_(src.bias)
 
-# TODO(Imports):
-# - torch
-# - torch.nn as nn
-# - typing: Dict, Type, Optional
 
-# =============================================================================
-# TODO 0) Purpose
-# =============================================================================
-# - Define encoder modules ONLY:
-#   - PixelEncoder: CNN -> latent z
-#   - IdentityEncoder: passthrough for vector observations
-# - Provide make_encoder factory
-# - Provide optional conv weight copying (for tying conv between modules)
-#
-# IMPORTANT:
-# - No EMA update here (belongs to ccfdm_agent.py)
-# - No SAC logic here
-# - No losses here
+class PixelEncoder(nn.Module):
+    def __init__(self, obs_shape, feature_dim, num_layers, num_filters, output_logits):
+        super().__init__()
+        assert len(obs_shape) == 3, f"obs_shape must be (C,H,W), got {obs_shape}"
 
-# =============================================================================
-# TODO 1) Helper: tie/copy weights (optional)
-# =============================================================================
-# TODO:
-# def tie_weights(src: nn.Module, trg: nn.Module) -> None:
-#   - assert same type
-#   - trg.weight = src.weight; trg.bias = src.bias
-#
-# NOTE:
-# - Use ONLY for conv-weight tying between two encoders (e.g., actor vs critic if needed).
-# - Do NOT use this to "EMA update" KE (EMA is separate, in agent).
+        self.obs_shape = obs_shape
+        self.feature_dim = feature_dim
+        self.num_layers = num_layers
+        self.num_filters = num_filters
+        self.outputs = dict()
+        self.output_logits = output_logits
 
-# =============================================================================
-# TODO 2) PixelEncoder (CNN)
-# =============================================================================
-# TODO:
-# class PixelEncoder(nn.Module):
-#   __init__(obs_shape, feature_dim, num_layers, num_filters, output_logits=False)
-#   - Build conv stack:
-#       conv1: stride=2
-#       conv_i: stride=1
-#   - Compute flatten_dim dynamically via dummy forward:
-#       with torch.no_grad(): run conv on zeros -> compute flattened size
-#   - Define:
-#       self.fc = nn.Linear(flatten_dim, feature_dim)
-#       self.ln = nn.LayerNorm(feature_dim)
-#   - Store:
-#       obs_shape, feature_dim, num_layers, output_logits
-#
-# TODO: forward_conv(obs)
-# - Normalize obs to [0,1] (assume uint8 input in [0,255])
-# - Apply conv + ReLU
-# - Flatten -> (B, flatten_dim)
-#
-# TODO: forward(obs, detach=False)
-# - h = forward_conv(obs)
-# - if detach: h = h.detach()
-# - z = ln(fc(h))
-# - if output_logits: return z
-#   else: return torch.tanh(z)
-#
-# TODO: copy_conv_weights_from(source_encoder)
-# - Tie/copy ONLY conv weights
+        C, H, W = obs_shape
 
-# =============================================================================
-# TODO 3) IdentityEncoder (vector obs)
-# =============================================================================
-# TODO:
-# class IdentityEncoder(nn.Module):
-# - feature_dim = obs_shape[0]
-# - forward returns obs (cast to float if needed)
-# - copy_conv_weights_from: pass
+        convs = []
+        convs.append(nn.Conv2d(C, num_filters, kernel_size=3, stride=2))
+        for _ in range(1, num_layers):
+            convs.append(nn.Conv2d(num_filters, num_filters, kernel_size=3, stride=1))
+        self.convs = nn.ModuleList(convs)
 
-# =============================================================================
-# TODO 4) Factory: make_encoder
-# =============================================================================
-# TODO:
-# _AVAILABLE_ENCODERS = {"pixel": PixelEncoder, "identity": IdentityEncoder}
-#
-# def make_encoder(encoder_type, obs_shape, feature_dim, num_layers, num_filters, output_logits=False):
-# - validate encoder_type
-# - return instance
+        # compute flatten dim dynamically
+        with torch.no_grad():
+            dummy = torch.zeros(1, C, H, W)
+            h = self._forward_convs(dummy)
+            flatten_dim = h.view(1, -1).shape[1]
 
-# =============================================================================
-# TODO 5) Notes for CCFDM usage
-# =============================================================================
-# - ccfdm_agent.py will instantiate:
-#     qe = make_encoder(...)
-#     ke = make_encoder(...)
-# - ke starts as a copy of qe weights (one-time copy)
-# - ke is updated ONLY via EMA in ccfdm_agent.py
+        self.fc = nn.Linear(flatten_dim, feature_dim)
+        self.ln = nn.LayerNorm(feature_dim)
+
+    def _forward_convs(self, obs):
+        x = obs
+        for conv in self.convs:
+            x = F.relu(conv(x))
+        return x
+
+    def forward_conv(self, obs):
+        # normalize to [0,1] if uint8 or if values look like 0..255
+        if obs.dtype == torch.uint8:
+            obs = obs.float() / 255.0
+        else:
+            if obs.max() > 1.5:
+                obs = obs / 255.0
+
+        h = self._forward_convs(obs)
+        h = h.view(h.size(0), -1)
+        return h
+
+    def forward(self, obs, detach):
+        h = self.forward_conv(obs)
+        if detach:
+            h = h.detach()
+
+        z = self.fc(h)
+        z = self.ln(z)
+
+        if self.output_logits:
+            return z
+        return torch.tanh(z)
+
+    def copy_conv_weights_from(self, source):
+        assert isinstance(source, PixelEncoder), "source must be PixelEncoder"
+        assert len(source.convs) == len(self.convs), "num_layers mismatch"
+
+        for src_layer, trg_layer in zip(source.convs, self.convs):
+            copy_weights(src_layer, trg_layer)
+
+    def log(self, L, step, log_freq):
+        if step % log_freq != 0:
+            return
+
+        for k, v in self.outputs.items():
+            L.log_histogram('train_encoder/%s_hist' % k, v, step)
+
+        for i in range(self.num_layers):
+            L.log_param('train_encoder/conv%s' % (i + 1), self.convs[i], step)
+        L.log_param('train_encoder/fc', self.fc, step)
+        L.log_param('train_encoder/ln', self.ln, step)
+
+
+def make_encoder(encoder_type, obs_shape, feature_dim, num_layers, num_filters, output_logits):
+    encoder_type = (encoder_type or "pixel").lower().strip()
+    if encoder_type != "pixel":
+        raise ValueError(f"Only encoder_type='pixel' is supported now. Got '{encoder_type}'")
+
+    return PixelEncoder(
+        obs_shape=obs_shape,
+        feature_dim=feature_dim,
+        num_layers=num_layers,
+        num_filters=num_filters,
+        output_logits=output_logits,
+    )
