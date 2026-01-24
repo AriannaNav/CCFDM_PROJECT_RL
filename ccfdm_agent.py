@@ -195,8 +195,8 @@ class CCFDMAgent(object):
         current_Q1, current_Q2 = self.critic(obs, action, detach_encoder=False)
         critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
-        self.critic_q_optimizer.zero_grad(set_to_none=True)
-        self.encoder_optimizer.zero_grad(set_to_none=True)
+        self.critic_q_optimizer.zero_grad()
+        self.encoder_optimizer.zero_grad()
 
         critic_loss.backward()
 
@@ -213,11 +213,11 @@ class CCFDMAgent(object):
 
         actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
-        self.actor_optimizer.zero_grad(set_to_none=True)
+        self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        self.log_alpha_optimizer.zero_grad(set_to_none=True)
+        self.log_alpha_optimizer.zero_grad()
         alpha_loss = (self.alpha * (-log_pi - self.target_entropy).detach()).mean()
         alpha_loss.backward()
         self.log_alpha_optimizer.step()
@@ -234,8 +234,8 @@ class CCFDMAgent(object):
         _, _, _, loss_c = self.ccfdm.forward_ccfdm(obs, action, next_obs, obs_pos=None)
 
         # Eq.(8) updates encoder + ccfdm-only params
-        self.encoder_optimizer.zero_grad(set_to_none=True)
-        self.ccfdm_optimizer.zero_grad(set_to_none=True)
+        self.encoder_optimizer.zero_grad()
+        self.ccfdm_optimizer.zero_grad()
 
         loss_c.backward()
 
