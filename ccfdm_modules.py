@@ -136,7 +136,7 @@ class CURL(nn.Module):
     @torch.no_grad()
     def encode_target(self, obs):
         obs = obs.to(self.device)
-        z = self.encoder_target(obs)
+        z = self.encoder_target(obs, detach=True)
         return z
 
     def predict_next(self, z_t, a_t):
@@ -166,7 +166,7 @@ class CURL(nn.Module):
 
     def forward_ccfdm(self, obs, action, next_obs, obs_pos=None):
         """
-        Paper-faithful CCFDM:
+        Paper-faithful CCFDM:   
         - positive key is the next observation (same transition)
         - obs_pos is accepted for compatibility but not used
 
