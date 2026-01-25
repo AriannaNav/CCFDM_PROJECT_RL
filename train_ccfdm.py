@@ -5,7 +5,6 @@ import argparse
 import os
 import time
 from dataclasses import asdict
-from typing import Dict, Any, Tuple, Optional
 
 import numpy as np
 import torch
@@ -198,6 +197,8 @@ def main_train():
     logger = Logger(log_dir, name="train")
     eval_logger = Logger(log_dir, name="eval")  # for Fig.5 curve
 
+    print("[DBG] before replay buffer")
+
     rb = ReplayBuffer(
         obs_shape=env.obs_shape,
         action_shape=env.action_shape,
@@ -206,6 +207,8 @@ def main_train():
         device=device,
         image_size=spec.image_size,
     )
+
+    print("[DBG] after replay buffer")
 
     agent = CCFDMAgent(
         obs_shape=env.obs_shape,
@@ -227,6 +230,8 @@ def main_train():
         intrinsic_decay=args.intrinsic_decay,
     )
 
+    print("[DBG] after agent")
+    
     # important: target critic always eval (EMA only)
     agent.critic_target.eval()
 
@@ -360,6 +365,6 @@ def main_train_ccfdm():
 
 def main():
     main_train()
-    
+
 if __name__ == "__main__":
     main_train()

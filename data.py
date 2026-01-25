@@ -83,12 +83,15 @@ def random_shift(imgs, pad: int = 4):
 
 def to_torch_obs(obs_u8, device):
     """
-    obs_u8: np.uint8 array (B,C,H,W) or (C,H,W)
-    returns float32 in [0,1] on device
+    Safe path on MPS: numpy -> CPU tensor -> .to(device)
     """
-    obs_u8 = np.ascontiguousarray(obs_u8)               
-    t = torch.from_numpy(obs_u8).to(device=device)      
-    return t.float().div_(255.0)
+    if isinstance(obs_u8, torch.Tensor):
+        t = obs_u8
+    else:
+        t = torch.from_numpy(obs_u8)  # CPU tensor
+
+    t = t.to(device=device, dtype=torch.float32)  # move to device safely
+    return t / 255.0
 
 
 @dataclass
@@ -200,9 +203,9 @@ class ReplayBuffer:
         obs = to_torch_obs(obs_u8, self.device)
         next_obs = to_torch_obs(next_obs_u8, self.device)
 
-        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
-        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
-        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
+        action = torch.from_numpy(self._actions[idxs]).to(self.device, dtype=torch.float32)
+        reward = torch.from_numpy(self._rewards[idxs]).to(self.device, dtype=torch.float32)
+        not_done = torch.from_numpy(self._not_dones[idxs]).to(self.device, dtype=torch.float32)
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
@@ -248,9 +251,9 @@ class ReplayBuffer:
         obs_pos = to_torch_obs(obs_pos_u8, self.device)
         next_obs = to_torch_obs(next_obs_u8, self.device)
 
-        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
-        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
-        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
+        action = torch.from_numpy(self._actions[idxs]).to(self.device, dtype=torch.float32)
+        reward = torch.from_numpy(self._rewards[idxs]).to(self.device, dtype=torch.float32)
+        not_done = torch.from_numpy(self._not_dones[idxs]).to(self.device, dtype=torch.float32)
 
         cpc_kwargs = {"obs_pos": obs_pos}
 
