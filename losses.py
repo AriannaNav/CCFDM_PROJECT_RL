@@ -70,7 +70,17 @@ def infonce_loss(
         normalize=normalize,
         eps=eps,
     )
-    return F.cross_entropy(logits, labels)
+
+    # ---- MPS-safe InfoNCE (avoid F.cross_entropy bus error) ----
+    logits = logits.float().contiguous()
+    labels = labels.long()
+
+    # stabilità numerica
+    logits = logits - logits.max(dim=1, keepdim=True).values
+
+    log_probs = F.log_softmax(logits, dim=1)  # (B,B)
+    loss = -log_probs.gather(1, labels.view(-1, 1)).mean()
+    return loss
 
 
 # ---------------------------------------------------------------------
