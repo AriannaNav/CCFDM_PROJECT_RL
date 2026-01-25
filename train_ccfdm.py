@@ -231,7 +231,7 @@ def main_train():
     )
 
     print("[DBG] after agent")
-    
+
     # important: target critic always eval (EMA only)
     agent.critic_target.eval()
 
@@ -246,6 +246,10 @@ def main_train():
     t0 = time.time()
 
     for step in range(1, args.total_steps + 1):
+        if step == 1:
+            print(f"[WARMUP] collecting {args.init_random_steps} random steps, updates start at step >= {args.update_after} and when replay >= {args.batch_size}")
+        if step == args.update_after:
+            print(f"[TRAIN] update_after reached at step={step} (will train only if replay >= batch_size)")
         # action
         if step <= args.init_random_steps:
             action = sample_random_action(env)
@@ -271,6 +275,8 @@ def main_train():
 
         # update
         if step >= args.update_after and rb.size >= args.batch_size:
+            if step == args.update_after:
+                print(f"[TRAIN] first possible update at step={step} (replay={rb.size})")
             for _ in range(args.update_every):
                 agent.update(rb, logger=logger, step=step)
 
@@ -285,6 +291,8 @@ def main_train():
                 },
                 step=step,
             )
+            # --- HUMAN READABLE episode print
+            print(f"[EP ] step={step} ep={episode_idx} return={ep_ret:.3f} len={ep_len}")
             obs, _ = env.reset()
             ep_ret = 0.0
             ep_len = 0
@@ -294,30 +302,31 @@ def main_train():
             elapsed = time.time() - t0
             sps = step / max(1e-9, elapsed)
 
-            # print also last losses if available
             last_critic = logger.last("train/critic_loss", None)
             last_actor = logger.last("train/actor_loss", None)
             last_alpha = logger.last("train/alpha", None)
             last_c = logger.last("train/contrastive_loss", None)
-            last_rtot = logger.last("train/reward_total_mean", None)
 
-            logger.log_dict(
-                {
-                    "train/step": step,
-                    "train/replay_size": rb.size,
-                    "train/sps": sps,
-                },
-                step=step,
-            )
-            logger.flush()
+            last_r_ext = logger.last("train/reward_ext_mean", None)
+            last_r_int = logger.last("train/reward_int_mean", None)
+            last_r_tot = logger.last("train/reward_total_mean", None)
+
+            last_ep_ret = logger.last("train/episode_return", None)
+            last_ep_len = logger.last("train/episode_length", None)
+
+            def _fmt(x, prec=4):
+                if x is None:
+                    return "NA"
+                try:
+                    return f"{float(x):.{prec}f}"
+                except Exception:
+                    return str(x)
 
             print(
-                f"[INFO] step={step} replay={rb.size} sps={sps:.1f} "
-                f"rtot={last_rtot if last_rtot is not None else 'NA'} "
-                f"critic={last_critic if last_critic is not None else 'NA'} "
-                f"actor={last_actor if last_actor is not None else 'NA'} "
-                f"alpha={last_alpha if last_alpha is not None else 'NA'} "
-                f"ccfdm={last_c if last_c is not None else 'NA'}"
+                f"[LOG] step={step} replay={rb.size} sps={sps:.1f} | "
+                f"ep_ret={_fmt(last_ep_ret,3)} ep_len={_fmt(last_ep_len,0)} | "
+                f"r_ext={_fmt(last_r_ext,4)} r_int={_fmt(last_r_int,4)} r_tot={_fmt(last_r_tot,4)} | "
+                f"critic={_fmt(last_critic,6)} actor={_fmt(last_actor,6)} alpha={_fmt(last_alpha,6)} ccfdm={_fmt(last_c,6)}"
             )
 
         # periodic EVAL (paper-style) + best.pt
@@ -333,7 +342,7 @@ def main_train():
             )
             eval_logger.flush()
 
-            print(f"[EVAL] step={step} mean_return={mean_ret:.3f} std={std_ret:.3f}")
+            print(f"[EVAL] step={step} mean_return={mean_ret:.3f} std={std_ret:.3f} (episodes={args.eval_episodes})")
 
             if mean_ret > best_eval_return:
                 best_eval_return = mean_ret
