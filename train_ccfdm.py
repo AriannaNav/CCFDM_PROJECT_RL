@@ -85,7 +85,8 @@ def parse_args():
     # contrastive
     p.add_argument("--contrastive_method", type=str, default="infonce", choices=["infonce", "triplet", "byol"])
     p.add_argument("--temperature", type=float, default=1.0)
-    p.add_argument("--normalize", action="store_true")
+    p.add_argument("--normalize", action="store_true", default=True)
+    p.add_argument("--no_normalize", action="store_false", dest="normalize")
     p.add_argument("--triplet_margin", type=float, default=0.2)
 
     # curiosity
@@ -328,6 +329,16 @@ def main_train():
                 f"r_ext={_fmt(last_r_ext,4)} r_int={_fmt(last_r_int,4)} r_tot={_fmt(last_r_tot,4)} | "
                 f"critic={_fmt(last_critic,6)} actor={_fmt(last_actor,6)} alpha={_fmt(last_alpha,6)} ccfdm={_fmt(last_c,6)}"
             )
+
+            logger.log_dict(
+                {
+                    "train/step": step,
+                    "train/replay_size": rb.size,
+                    "train/sps": sps,
+                },
+                step=step,
+            )
+            logger.flush()
 
         # periodic EVAL (paper-style) + best.pt
         if args.eval_every is not None and args.eval_every > 0 and (step % args.eval_every == 0):
