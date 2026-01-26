@@ -195,26 +195,20 @@ def contrastive_loss(
 
 class CuriosityModule:
     """
-    r_i = C * exp(-gamma*t) * (d / rmax_i) * rmax_e
+    Intrinsic reward from FDM prediction error in feature space (L2).
 
-    d = dissimilarity derived from bilinear similarity:
-      d = -(q^T W k) shifted to be >= 0
+    Inputs:
+      q_pred: predicted next feature from FDM        (B, D)
+      k_pos:  target next feature from target/key   (B, D)
+
+    d  = ||k_pos - q_pred||_2  (per-sample)
+    ri = C * exp(-gamma*t) * (d / rmax_i) * rmax_e
     """
 
-    def __init__(
-        self,
-        device,
-        bilinear,
-        C=0.1,
-        gamma=1e-6,
-        normalize_inputs=True,
-        eps=1e-8,
-    ):
+    def __init__(self, device, C=0.1, gamma=1e-6, eps=1e-8):
         self.device = device
-        self.bilinear = bilinear
         self.C = float(C)
         self.gamma = float(gamma)
-        self.normalize_inputs = bool(normalize_inputs)
         self.eps = float(eps)
 
         self.rmax_e = torch.tensor(0.0, device=self.device)
@@ -226,29 +220,28 @@ class CuriosityModule:
         self.rmax_e = torch.maximum(self.rmax_e, r_ext.max())
 
     @torch.no_grad()
-    def dissimilarity(self, q, k):
-        q = q.to(self.device)
-        k = k.to(self.device)
+    def prediction_error_l2(self, q_pred, k_pos):
+        q_pred = q_pred.to(self.device)
+        k_pos = k_pos.to(self.device)
 
-        q = F.normalize(q, dim=1, eps=self.eps)
-        k = F.normalize(k, dim=1, eps=self.eps)
-
-        sim = (q * k).sum(dim=1)   # cosine similarity in [-1, 1]
-        d = 1.0 - sim              # dissimilarity in [0, 2]
+        # per-sample Euclidean error (repo-style)
+        d = (k_pos - q_pred).pow(2).sum(dim=1).sqrt()  # (B,)
         return d
 
     @torch.no_grad()
-    def intrinsic_reward(self, q, k, t):
-        d = self.dissimilarity(q, k)
+    def intrinsic_reward(self, q_pred, k_pos, t):
+        d = self.prediction_error_l2(q_pred, k_pos)  # (B,)
 
+        # update running max of intrinsic
         self.rmax_i = torch.maximum(self.rmax_i, d.max())
-
         denom_i = torch.clamp(self.rmax_i, min=self.eps)
+
+        # scale by running max of extrinsic
         scale_e = torch.clamp(self.rmax_e, min=self.eps)
 
         decay = math.exp(-self.gamma * float(t))
-        return self.C * decay * (d / denom_i) * scale_e
-
+        ri = self.C * decay * (d / denom_i) * scale_e  # (B,)
+        return ri.view(-1, 1)  # (B,1)
 
 # ---------------------------------------------------------------------
 # 4) InfoNCE metrics (optional)
@@ -269,3 +262,5 @@ def infonce_metrics_from_logits(logits, labels):
         "pos_mean": pos.mean().item(),
         "neg_mean": neg.mean().item(),
     }
+
+#Se vuoi essere identica alla repo, allora la dissimilarity deve essere L2(q_pred, k_pos), non -bilinear_sim.
