@@ -53,6 +53,7 @@ class CCFDMAgent(object):
         action_embed_dim=50,
         # NEW: keep actor encoder synced with critic encoder
         actor_encoder_sync=True,
+        momentum_update_freq=1,
     ):
         self.device = device
 
@@ -67,7 +68,7 @@ class CCFDMAgent(object):
         self.intrinsic_decay = float(intrinsic_decay)  # not used
 
         self.actor_encoder_sync = bool(actor_encoder_sync)
-
+        self.momentum_update_freq = int(momentum_update_freq)
         # --- networks
         self.actor = SACActor(
             obs_dim=obs_shape,
@@ -308,14 +309,17 @@ class CCFDMAgent(object):
             self.update_ccfdm(obs_anchor, action_cpc, next_obs_cpc, logger, step)
 
         # target / momentum update (critic_target + encoder_target)
+        # target critic (Q networks) update
         if step % self.critic_target_update_freq == 0:
             soft_update(self.critic_target.Q1, self.critic.Q1, self.critic_tau)
             soft_update(self.critic_target.Q2, self.critic.Q2, self.critic_tau)
+
+        # momentum encoder (key encoder) update
+        if step % self.momentum_update_freq == 0:
             soft_update(self.critic_target.encoder, self.critic.encoder, self.encoder_tau)
 
-            # IMPORTANT: keep actor encoder aligned with critic encoder
+            # (opzionale) tieni actor conv allineato al critic encoder
             self._sync_actor_encoder_from_critic()
-
     # ---------------- io ----------------
 
     def save(self, path):

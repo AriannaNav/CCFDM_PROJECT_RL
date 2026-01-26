@@ -96,7 +96,7 @@ def parse_args():
     # curiosity
     p.add_argument("--curiosity_C", type=float, default=0.2)
     p.add_argument("--curiosity_gamma", type=float, default=2e-5)
-
+    p.add_argument("--momentum_update_freq", type=int, default=1)
     return p.parse_args()
 
 
@@ -231,6 +231,7 @@ def main_train():
         curiosity_C=args.curiosity_C,
         curiosity_gamma=args.curiosity_gamma,
         intrinsic_weight=args.intrinsic_weight,
+        momentum_update_freq=args.momentum_update_freq
     )
 
     agent.critic_target.eval()

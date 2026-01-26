@@ -120,6 +120,7 @@ def main_eval():
         curiosity_C=float(train_args.get("curiosity_C", 0.2)),
         curiosity_gamma=float(train_args.get("curiosity_gamma", 2e-5)),
         intrinsic_weight=float(train_args.get("intrinsic_weight", 0.2)),
+        momentum_update_freq=int(train_args.get("momentum_update_freq", 1)),
     )
 
     agent = CCFDMAgent(**agent_kwargs)
