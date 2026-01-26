@@ -1,4 +1,6 @@
 # ccfdm_agent.py
+from __future__ import annotations
+
 import math
 import torch
 import torch.nn.functional as F
@@ -43,12 +45,14 @@ class CCFDMAgent(object):
         temperature=1.0,
         normalize=True,
         triplet_margin=0.2,
-        # curiosity config (paper-faithful defaults)
+        # curiosity config
         curiosity_C=0.2,
         curiosity_gamma=2e-5,
         intrinsic_weight=1.0,
         intrinsic_decay=0.0,  # kept for backward compatibility; not used
         action_embed_dim=50,
+        # NEW: keep actor encoder synced with critic encoder
+        actor_encoder_sync=True,
     ):
         self.device = device
 
@@ -61,6 +65,8 @@ class CCFDMAgent(object):
 
         self.intrinsic_weight = float(intrinsic_weight)
         self.intrinsic_decay = float(intrinsic_decay)  # not used
+
+        self.actor_encoder_sync = bool(actor_encoder_sync)
 
         # --- networks
         self.actor = SACActor(
@@ -99,16 +105,15 @@ class CCFDMAgent(object):
         for p in self.critic_target.parameters():
             p.requires_grad_(False)
 
-        # tie conv weights actor<-critic (stile CURL)
-        if hasattr(self.actor.encoder, "copy_conv_weights_from"):
-            self.actor.encoder.copy_conv_weights_from(self.critic.encoder)
+        # tie conv weights actor<-critic (CURL-style init)
+        self._sync_actor_encoder_from_critic()
 
         # --- temperature (alpha)
         self.log_alpha = torch.tensor(math.log(init_temperature), device=device)
         self.log_alpha.requires_grad_(True)
         self.target_entropy = -float(action_shape[0])
 
-        # --- CCFDM module
+        # --- CCFDM module (uses critic encoder + critic_target encoder)
         self.ccfdm = CURL(
             obs_shape=obs_shape,
             action_shape=action_shape,
@@ -140,7 +145,7 @@ class CCFDMAgent(object):
             q_params, lr=critic_lr, betas=(critic_beta, 0.999)
         )
 
-        # (2) encoder only (updated by critic loss AND contrastive loss)
+        # (2) encoder only (updated by critic TD loss AND contrastive loss)
         self.encoder_optimizer = torch.optim.Adam(
             self.critic.encoder.parameters(), lr=critic_lr, betas=(critic_beta, 0.999)
         )
@@ -156,6 +161,16 @@ class CCFDMAgent(object):
 
         self.train(True)
 
+    # ---------------- small helpers ----------------
+
+    def _sync_actor_encoder_from_critic(self):
+        """Keep actor encoder aligned with critic encoder (important to avoid representation drift)."""
+        if not self.actor_encoder_sync:
+            return
+        if hasattr(self.actor, "encoder") and hasattr(self.critic, "encoder"):
+            if hasattr(self.actor.encoder, "copy_conv_weights_from"):
+                self.actor.encoder.copy_conv_weights_from(self.critic.encoder)
+
     @property
     def alpha(self):
         return self.log_alpha.exp()
@@ -163,23 +178,24 @@ class CCFDMAgent(object):
     def train(self, training=True):
         self.training = bool(training)
 
-        # online nets seguono il flag training
         self.actor.train(self.training)
         self.critic.train(self.training)
         self.ccfdm.train(self.training)
 
-        # target net SEMPRE in eval (aggiornata solo via EMA)
+        # target always eval (EMA updates only)
         self.critic_target.eval()
+
+    # ---------------- acting ----------------
 
     def select_action(self, obs):
         with torch.no_grad():
-            obs = torch.FloatTensor(obs).to(self.device).unsqueeze(0)
+            obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32).unsqueeze(0)
             mu, _, _, _ = self.actor(obs, compute_pi=False, compute_log_pi=False)
             return mu.cpu().numpy().flatten()
 
     def sample_action(self, obs):
         with torch.no_grad():
-            obs = torch.FloatTensor(obs).to(self.device).unsqueeze(0)
+            obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32).unsqueeze(0)
             _, pi, _, _ = self.actor(obs, compute_pi=True, compute_log_pi=False)
             return pi.cpu().numpy().flatten()
 
@@ -197,9 +213,7 @@ class CCFDMAgent(object):
 
         self.critic_q_optimizer.zero_grad()
         self.encoder_optimizer.zero_grad()
-
         critic_loss.backward()
-
         self.critic_q_optimizer.step()
         self.encoder_optimizer.step()
 
@@ -207,6 +221,7 @@ class CCFDMAgent(object):
             logger.log("train/critic_loss", float(critic_loss.item()), step)
 
     def update_actor_and_alpha(self, obs, logger=None, step=0):
+        # detach encoder: actor update shouldn't backprop into encoder (CURL-style)
         _, pi, log_pi, _ = self.actor(obs, detach_encoder=True, compute_pi=True, compute_log_pi=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
         actor_Q = torch.min(actor_Q1, actor_Q2)
@@ -230,15 +245,11 @@ class CCFDMAgent(object):
     # ---------------- CCFDM (Eq.8 + Eq.9) ----------------
 
     def update_ccfdm(self, obs, action, next_obs, logger=None, step=0):
-        # Paper-faithful: positive key is next_obs; obs_pos is ignored in forward_ccfdm
         _, _, _, loss_c = self.ccfdm.forward_ccfdm(obs, action, next_obs, obs_pos=None)
 
-        # Eq.(8) updates encoder + ccfdm-only params
         self.encoder_optimizer.zero_grad()
         self.ccfdm_optimizer.zero_grad()
-
         loss_c.backward()
-
         self.encoder_optimizer.step()
         self.ccfdm_optimizer.step()
 
@@ -249,17 +260,17 @@ class CCFDMAgent(object):
 
     @torch.no_grad()
     def compute_intrinsic_reward(self, obs, action, next_obs, r_ext, t):
-        z_t = self.ccfdm.encode(obs, detach=True)           # no grad
-        z_next_target = self.ccfdm.encode_target(next_obs)  # target encoder
+        z_t = self.ccfdm.encode(obs, detach=True)
+        z_next_target = self.ccfdm.encode_target(next_obs)
         z_pred_next = self.ccfdm.predict_next(z_t, action)
 
+        # NOTE: what intrinsic_reward computes depends on CuriosityModule in losses.py
         ri = self.ccfdm.intrinsic_reward(z_pred_next, z_next_target, r_ext, t)
         return ri
 
     # ---------------- main update ----------------
 
     def update(self, replay_buffer, logger=None, step=0):
-        # --- SAC batch (standard RL)
         batch_rl = replay_buffer.sample()
 
         obs = batch_rl.obs.to(self.device)
@@ -272,35 +283,40 @@ class CCFDMAgent(object):
             ri = self.compute_intrinsic_reward(obs, action, next_obs, reward, step)
             reward_total = reward + self.intrinsic_weight * ri.view(-1, 1)
         else:
+            ri = None
             reward_total = reward
 
         if logger is not None:
             logger.log("train/reward_ext_mean", float(reward.mean().item()), step)
             logger.log("train/reward_total_mean", float(reward_total.mean().item()), step)
-            if self.training:
+            if self.training and ri is not None:
                 logger.log("train/reward_int_mean", float(ri.mean().item()), step)
 
-        # --- SAC updates
+        # SAC updates
         self.update_critic(obs, action, reward_total, next_obs, not_done, logger, step)
 
         if step % self.actor_update_freq == 0:
             self.update_actor_and_alpha(obs, logger, step)
 
-        # --- CCFDM contrastive update (Eq. 8) with CPC batch
+        # CCFDM contrastive update (Eq.8)
         if step % self.ccfmd_update_freq == 0:
             batch_cpc = replay_buffer.sample_cpc()
             obs_anchor = batch_cpc.obs.to(self.device)
             action_cpc = batch_cpc.action.to(self.device)
             next_obs_cpc = batch_cpc.next_obs.to(self.device)
 
-            # IMPORTANT: do NOT pass obs_pos here (Option A ignores it anyway)
             self.update_ccfdm(obs_anchor, action_cpc, next_obs_cpc, logger, step)
 
-        # --- target / momentum update
+        # target / momentum update (critic_target + encoder_target)
         if step % self.critic_target_update_freq == 0:
             soft_update(self.critic_target.Q1, self.critic.Q1, self.critic_tau)
             soft_update(self.critic_target.Q2, self.critic.Q2, self.critic_tau)
             soft_update(self.critic_target.encoder, self.critic.encoder, self.encoder_tau)
+
+            # IMPORTANT: keep actor encoder aligned with critic encoder
+            self._sync_actor_encoder_from_critic()
+
+    # ---------------- io ----------------
 
     def save(self, path):
         payload = {
@@ -319,3 +335,6 @@ class CCFDMAgent(object):
         self.critic_target.load_state_dict(payload["critic_target"])
         self.ccfdm.load_state_dict(payload["ccfdm"])
         self.log_alpha.data.copy_(payload["log_alpha"].to(self.device))
+
+        # after load, re-sync actor encoder (safe)
+        self._sync_actor_encoder_from_critic()
