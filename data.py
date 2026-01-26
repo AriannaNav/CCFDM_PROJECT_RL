@@ -5,6 +5,19 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 
+def preprocess_obs(obs, bits=5):
+    """
+    obs: torch.float32 in [0..255] (NON /255 prima)
+    output: circa [-0.5, 0.5]
+    """
+    bins = 2 ** bits
+    assert obs.dtype == torch.float32
+    if bits < 8:
+        obs = torch.floor(obs / 2 ** (8 - bits))
+    obs = obs / bins
+    obs = obs + torch.rand_like(obs) / bins
+    obs = obs - 0.5
+    return obs
 
 def random_crop(imgs, out_size):
     """
@@ -81,17 +94,12 @@ def random_shift(imgs, pad: int = 4):
     return out
 
 
-def to_torch_obs(obs_u8, device):
-    """
-    Safe path on MPS: numpy -> CPU tensor -> .to(device)
-    """
-    if isinstance(obs_u8, torch.Tensor):
-        t = obs_u8
-    else:
-        t = torch.from_numpy(obs_u8)  # CPU tensor
-
-    t = t.to(device=device, dtype=torch.float32)  # move to device safely
-    return t / 255.0
+def to_torch_obs(obs_u8, device, bits=5):
+    obs_u8 = np.ascontiguousarray(obs_u8)  # <-- safety
+    t = torch.from_numpy(obs_u8)
+    t = t.to(device=device, dtype=torch.float32)
+    t = preprocess_obs(t, bits=bits)
+    return t
 
 
 @dataclass
@@ -187,31 +195,27 @@ class ReplayBuffer:
         return np.random.randint(0, n, size=self.batch_size)
 
     def sample(self):
-        """
-        Standard SAC batch.
-        NEW: applies DrQ-style random shift augmentation to obs and next_obs.
-        """
         idxs = self.sample_idxs()
 
         obs_u8 = self._obses[idxs]
         next_obs_u8 = self._next_obses[idxs]
 
-        # NEW: effective augmentation even if frames are already 84x84
-        obs_u8 = random_shift(obs_u8, pad=self.aug_pad)
-        next_obs_u8 = random_shift(next_obs_u8, pad=self.aug_pad)
+        # COME REPO: crop (non shift)
+        obs_u8 = random_crop(obs_u8, self.image_size)
+        next_obs_u8 = random_crop(next_obs_u8, self.image_size)
 
-        obs = to_torch_obs(obs_u8, self.device)
+        obs = to_torch_obs(obs_u8, self.device)          # fa preprocess bits=5
         next_obs = to_torch_obs(next_obs_u8, self.device)
 
-        action = torch.from_numpy(self._actions[idxs]).to(self.device, dtype=torch.float32)
-        reward = torch.from_numpy(self._rewards[idxs]).to(self.device, dtype=torch.float32)
-        not_done = torch.from_numpy(self._not_dones[idxs]).to(self.device, dtype=torch.float32)
+        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
+        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
+        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
 
     def sample_no_aug(self):
         """
-        Center-crop + no stochastic augmentation (useful for evaluation-like batches).
+        Center crop + preprocess 
         """
         idxs = self.sample_idxs()
 
@@ -226,36 +230,24 @@ class ReplayBuffer:
         not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
         return ReplayBatch(obs=obs, action=action, reward=reward, next_obs=next_obs, not_done=not_done)
-
+    
     def sample_cpc(self):
-        """
-        Contrastive batch:
-          - obs = obs_anchor (aug view)
-          - next_obs = next_obs (aug view)
-          - cpc_kwargs = { "obs_pos": second aug view of obs }
-        NEW: uses DrQ-style random shift to ensure augmentation is never a no-op on 84x84.
-        """
         idxs = self.sample_idxs()
 
-        obs_u8 = self._obses[idxs]            # (B,C,H,W)
-        next_obs_u8 = self._next_obses[idxs]
+        obs_u8 = self._obses[idxs]
+        next_u8 = self._next_obses[idxs]
 
-        # two different augmented views of current obs
-        obs_anchor_u8 = random_shift(obs_u8, pad=self.aug_pad)
-        obs_pos_u8 = random_shift(obs_u8, pad=self.aug_pad)
-
-        # augmented next obs
-        next_obs_u8 = random_shift(next_obs_u8, pad=self.aug_pad)
+        obs_anchor_u8 = random_crop(obs_u8, self.image_size)
+        obs_pos_u8 = random_crop(obs_u8, self.image_size)
+        next_u8 = random_crop(next_u8, self.image_size)
 
         obs_anchor = to_torch_obs(obs_anchor_u8, self.device)
         obs_pos = to_torch_obs(obs_pos_u8, self.device)
-        next_obs = to_torch_obs(next_obs_u8, self.device)
+        next_obs = to_torch_obs(next_u8, self.device)
 
-        action = torch.from_numpy(self._actions[idxs]).to(self.device, dtype=torch.float32)
-        reward = torch.from_numpy(self._rewards[idxs]).to(self.device, dtype=torch.float32)
-        not_done = torch.from_numpy(self._not_dones[idxs]).to(self.device, dtype=torch.float32)
-
-        cpc_kwargs = {"obs_pos": obs_pos}
+        action = torch.as_tensor(self._actions[idxs], device=self.device, dtype=torch.float32)
+        reward = torch.as_tensor(self._rewards[idxs], device=self.device, dtype=torch.float32)
+        not_done = torch.as_tensor(self._not_dones[idxs], device=self.device, dtype=torch.float32)
 
         return ReplayBatch(
             obs=obs_anchor,
@@ -263,5 +255,6 @@ class ReplayBuffer:
             reward=reward,
             next_obs=next_obs,
             not_done=not_done,
-            cpc_kwargs=cpc_kwargs,
+            cpc_kwargs={"obs_pos": obs_pos},
         )
+#OK 

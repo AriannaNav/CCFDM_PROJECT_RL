@@ -9,13 +9,12 @@ from minigrid.wrappers import RGBImgObsWrapper
 from PIL import Image
 
 
-def to_uint8_chw_rgb(obs_rgb_hwc, image_size):
-
+def to_uint8_chw_rgb(obs_rgb_hwc, out_size):
     if obs_rgb_hwc.dtype != np.uint8:
         obs_rgb_hwc = obs_rgb_hwc.astype(np.uint8)
 
     img = Image.fromarray(obs_rgb_hwc)
-    img = img.resize((image_size, image_size), resample=Image.BILINEAR)
+    img = img.resize((out_size, out_size), resample=Image.BILINEAR)
     arr = np.asarray(img, dtype=np.uint8)      # HWC
     chw = np.transpose(arr, (2, 0, 1))         # CHW
     return chw
@@ -72,6 +71,7 @@ class MiniGridContinuousWrapper:
         self.action_repeat = int(action_repeat)
         self.seed = int(seed)
         self.max_episode_steps = max_episode_steps
+        self.render_size = self.image_size + 16  # 84 -> 100
 
         env = gym.make(env_id)
         env = RGBImgObsWrapper(env)  # gives obs dict with "image" (HWC RGB)
@@ -83,14 +83,14 @@ class MiniGridContinuousWrapper:
         self._n_actions = int(self._env.action_space.n)
 
         # Observation format for the rest of the project: uint8 CHW stacked
-        self.obs_shape = (3 * self.frame_stack, self.image_size, self.image_size)
+        self.obs_shape = (3 * self.frame_stack, self.render_size, self.render_size)
 
         # Continuous proxy action space for SAC
         self.action_shape = (1,)
         self.action_low = np.array([-1.0], dtype=np.float32)
         self.action_high = np.array([1.0], dtype=np.float32)
 
-        self._fs = FrameStack(self.frame_stack, (3, self.image_size, self.image_size))
+        self._fs = FrameStack(self.frame_stack, (3, self.render_size, self.render_size))
 
         self._t = 0
         self._episode_idx = 0
@@ -117,7 +117,7 @@ class MiniGridContinuousWrapper:
 
         obs, info = self._env.reset(seed=seed)
         img = obs["image"] if isinstance(obs, dict) else obs  # HWC uint8
-        frame = to_uint8_chw_rgb(img, self.image_size)
+        frame = to_uint8_chw_rgb(img, self.render_size)
         stacked = self._fs.reset(frame)
         return stacked, info
 
@@ -151,7 +151,7 @@ class MiniGridContinuousWrapper:
 
         assert last_obs is not None
         img = last_obs["image"] if isinstance(last_obs, dict) else last_obs  # HWC
-        frame = to_uint8_chw_rgb(img, self.image_size)
+        frame = to_uint8_chw_rgb(img, self.render_size)
         stacked = self._fs.push(frame)
 
         return stacked, total_reward, terminated, truncated, info
@@ -177,3 +177,4 @@ def make_minigrid_env(
         seed=seed,
         max_episode_steps=max_episode_steps,
     )
+#ok 

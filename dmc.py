@@ -30,7 +30,7 @@ class FrameStack:
         self._frames = np.zeros((self.k, c, h, w), dtype=np.uint8)
         self._filled = False
 
-    def reset(self, first_frame) :
+    def reset(self, first_frame):
         for i in range(self.k):
             self._frames[i] = first_frame
         self._filled = True
@@ -52,13 +52,6 @@ class FrameStack:
 
 
 class DMCEnv:
-    """
-    dm_control -> pixel observations (uint8 CHW) + frame stacking
-    Standardized API:
-      reset() -> (obs, info)
-      step(a) -> (obs, reward, terminated, truncated, info)
-    """
-
     def __init__(
         self,
         domain,
@@ -72,21 +65,23 @@ class DMCEnv:
     ):
         self.domain = domain
         self.task = task
-        self.image_size = int(image_size)
+        self.image_size = int(image_size)          # crop size target (84)
         self.frame_stack = int(frame_stack)
         self.action_repeat = int(action_repeat)
         self.seed = int(seed)
         self.camera_id = int(camera_id)
         self.max_episode_steps = max_episode_steps
 
-        env = suite.load(domain_name=domain, task_name=task, task_kwargs={"random": seed})
+        # render bigger so that random_crop(., 84) is not a no-op
+        self.render_size = self.image_size + 16    # 84 -> 100
 
+        env = suite.load(domain_name=domain, task_name=task, task_kwargs={"random": seed})
         env = pixels.Wrapper(
             env,
             pixels_only=True,
             render_kwargs={
-                "height": self.image_size,
-                "width": self.image_size,
+                "height": self.render_size,
+                "width": self.render_size,
                 "camera_id": self.camera_id,
             },
         )
@@ -97,21 +92,22 @@ class DMCEnv:
         self.action_low = np.array(action_spec.minimum, dtype=np.float32)
         self.action_high = np.array(action_spec.maximum, dtype=np.float32)
 
-        self.obs_shape = (3 * self.frame_stack, self.image_size, self.image_size)
+        # IMPORTANT: env outputs render_size images (100x100), crop happens in ReplayBuffer
+        self.obs_shape = (3 * self.frame_stack, self.render_size, self.render_size)
+        self._fs = FrameStack(self.frame_stack, (3, self.render_size, self.render_size))
 
-        self._fs = FrameStack(self.frame_stack, (3, self.image_size, self.image_size))
         self._t = 0
 
-    def reset(self) :
+    def reset(self):
         self._t = 0
         ts = self._env.reset()
         obs = ts.observation
         img = obs["pixels"] if isinstance(obs, dict) else obs  # HWC
-        frame = resize_to_uint8_chw(img, self.image_size)
+        frame = resize_to_uint8_chw(img, self.render_size)     # <-- render_size
         stacked = self._fs.reset(frame)
         return stacked, {}
 
-    def step(self, action) :
+    def step(self, action):
         a = np.asarray(action, dtype=np.float32).reshape(self.action_shape)
         a = np.clip(a, self.action_low, self.action_high)
 
@@ -127,11 +123,9 @@ class DMCEnv:
             r = ts.reward if ts.reward is not None else 0.0
             total_reward += float(r)
 
-            # dm_control: ts.last() means episode ended (no native terminated/truncated split)
             terminated = bool(ts.last())
             self._t += 1
 
-            # external time limit => truncation (Gym standard)
             if self.max_episode_steps is not None and self._t >= int(self.max_episode_steps) and not terminated:
                 truncated = True
                 info["TimeLimit.truncated"] = True
@@ -142,12 +136,12 @@ class DMCEnv:
         assert ts is not None
         obs = ts.observation
         img = obs["pixels"] if isinstance(obs, dict) else obs
-        frame = resize_to_uint8_chw(img, self.image_size)
+        frame = resize_to_uint8_chw(img, self.render_size)     # <-- render_size
         stacked = self._fs.push(frame)
 
         return stacked, total_reward, terminated, truncated, info
 
-    def close(self) :
+    def close(self):
         if hasattr(self._env, "close"):
             self._env.close()
 
@@ -161,7 +155,7 @@ def make_dmc_env(
     seed,
     camera_id,
     max_episode_steps,
-) :
+):
     return DMCEnv(
         domain=domain,
         task=task,
