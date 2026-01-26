@@ -1,7 +1,7 @@
 # minigrid_env.py
 from __future__ import annotations
 
-from typing import Optional, Tuple, Dict, Any, Union
+from typing import Optional, Dict, Any
 
 import numpy as np
 import gymnasium as gym
@@ -10,10 +10,7 @@ from PIL import Image
 
 
 def to_uint8_chw_rgb(obs_rgb_hwc, image_size):
-    """
-    Input: HWC uint8 (or castable)
-    Output: CHW uint8 resized to (image_size, image_size)
-    """
+
     if obs_rgb_hwc.dtype != np.uint8:
         obs_rgb_hwc = obs_rgb_hwc.astype(np.uint8)
 
@@ -110,7 +107,7 @@ class MiniGridContinuousWrapper:
             return 0
 
         scaled = (a + 1.0) * 0.5 * (self._n_actions - 1)
-        idx = int(np.round(scaled))
+        idx = int(np.floor(scaled))
         return max(0, min(self._n_actions - 1, idx))
 
     def reset(self):
