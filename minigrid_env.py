@@ -71,7 +71,7 @@ class MiniGridContinuousWrapper:
         self.action_repeat = int(action_repeat)
         self.seed = int(seed)
         self.max_episode_steps = max_episode_steps
-        self.render_size = self.image_size + 16  # 84 -> 100
+        self.render_size = self.image_size  
 
         env = gym.make(env_id)
         env = RGBImgObsWrapper(env)  # gives obs dict with "image" (HWC RGB)

@@ -1,150 +1,190 @@
+A) Come si runna tutto (train / eval / video / plots)
 
-Curiosity Contrastive Forward Dynamics Model (CCFDM)
+0) Struttura output (importante)
 
-This repository contains an implementation of Curiosity Contrastive Forward Dynamics Model (CCFDM) built on top of Soft Actor-Critic (SAC), following:
+Con train_ccfdm.py tu generi due alberi paralleli:
+	•	Modelli
+	•	models/ccfdm/<env_tag>/seed_<seed>/
+	•	config.json (hyperparam + env spec usati nel train)
+	•	best.pt (checkpoint migliore secondo eval)
+	•	best.json (step+score migliore)
+	•	last.pt
+	•	ckpt_step_000000xxx.pt (ogni --save_every)
+	•	Log
+	•	logs/ccfdm/<env_tag>/seed_<seed>/
+	•	train.jsonl (log training)
+	•	eval.jsonl (log valutazioni periodiche)
+	•	fig5_eval_curve.png (se fai plots)
 
-Nguyen et al., “Sample-efficient Reinforcement Learning Representation Learning with Curiosity Contrastive Forward Dynamics Model”, 2021
+<env_tag> è coerente in tutto:
+	•	DMC: dmc_<domain>_<task>
+	•	MiniGrid: minigrid_<env_id>
 
-The framework combines:
-	•	pixel-based representation learning,
-	•	contrastive learning with a momentum encoder,
-	•	a forward dynamics model in latent space,
-	•	intrinsic motivation based on prediction error,
-	•	off-policy RL (SAC).
+1) TRAIN
+
+DMC (esempio)
+python main.py train \
+  --env dmc --dmc_domain cheetah --dmc_task run \
+  --seed 1 --device auto \
+  --total_steps 200000 \
+  --eval_every 10000 --eval_episodes 10
+
+MiniGrid (esempio)
+python main.py train \
+  --env minigrid --minigrid_id MiniGrid-Empty-8x8-v0 \
+  --seed 1 --device auto \
+  --total_steps 200000 
+
+Cosa succede durante il train
+	•	Fase “warmup”: fino a --init_random_steps l’azione è random (riempie replay).
+	•	Dopo --update_after (default = init_random_steps) e quando replay >= batch_size, parte l’update:
+	•	ogni step: update critic (TD) + reward intrinseca
+	•	ogni actor_update_freq: update actor+alpha
+	•	ogni ccfmd_update_freq: update contrastivo (Eq.8)
+	•	ogni critic_target_update_freq: soft update target (Q + encoder)
+
+Checkpoint
+	•	best.pt si aggiorna solo quando eval/mean_return migliora.
+	•	last.pt sempre aggiornato.
 
 ⸻
 
-1. Features
-	•	End-to-end training from pixels
-	•	Contrastive representation learning (InfoNCE)
-	•	Forward dynamics model for temporal consistency
-	•	Curiosity-driven intrinsic reward
-	•	Compatible with DeepMind Control Suite and MiniGrid
-	•	Deterministic evaluation and video rendering
-
- 2. Project Structure
- 
-├── main.py              # training entry point
-├── train_ccfdm.py       # legacy training script
-├── eval.py              # evaluation from saved checkpoint
-├── plots.py             # plot learning curves
-├── video.py             # render rollout video
-├── ccfdm_agent.py       # SAC + CCFDM agent
-├── ccfdm_modules.py     # FDM, action embedding, contrastive module
-├── encoder.py           # pixel encoder
-├── sac.py               # SAC implementation
-├── data.py              # replay buffer
-├── dmc.py               # DeepMind Control wrapper
-├── minigrid_env.py      # MiniGrid wrapper
-├── make_env.py          # environment factory
-├── losses.py            # contrastive and curiosity losses
-├── utils.py             # utilities (seed, soft update, etc.)
-└── logger.py            # logging utilities
-
-
-Training corto (20k step)
-
-Serve solo a verificare che tutto funzioni.
-python train_ccfdm.py \
-  --env dmc \
-  --dmc_domain walker \
-  --dmc_task walk \
-  --seed 1 \
-  --device mps \
-  --total_steps 20000 \
-  --init_random_steps 2000 \
-  --update_after 1000 \
-  --eval_every 5000 \
-  --eval_episodes 5
-
-📁 Output atteso:
-models/ccfdm/dmc_walker_walk/seed_1/
-  ├── last.pt
-  ├── best.pt
-logs/ccfdm/dmc_walker_walk/seed_1/
-Se non vedi errori e vengono salvati i file → sei a posto.
-
-
-3️⃣ Training “vero” (paper-like)
-python train_ccfdm.py \
-  --env dmc \
-  --dmc_domain walker \
-  --dmc_task walk \
-  --seed 1 \
-  --device mps \
-  --total_steps 500000 \
-  --batch_size 512 \
-  --eval_every 10000 \
-  --eval_episodes 10 \
-  --save_every 10000
-
-
-💡 Altri task DMC validi:
-	•	cartpole swingup
-	•	finger spin
-	•	cheetah run
-	•	ball_in_cup catch
-	•	reacher easy
-
-4️⃣ Evaluation (policy deterministica)
-
-Metodo diretto
-python eval.py \
-  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
-  --episodes 10 \
-  --device mps
+2) EVAL (carica best.pt e basta) 
+python main.py eval --model_dir models/ccfdm/dmc_cheetah_run/seed_1 --episodes 10 --seed 12345
 
 Output:
-	•	mean return
-	•	std return
+	•	stampa [EVAL] {mean_return, std_return, ...}
+	•	salva eval_result.json dentro model_dir
 
-5️⃣ Rendering / Video
-python video.py \
-  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
+Nota: il tuo eval attuale è già deterministico, perché usa sempre select_action() (mean action). Il flag --deterministic in eval.py al momento è inutile (vedi sezione “bug/da sistemare”).
+
+⸻
+3) VIDEO (rollout e render mp4)
+python main.py video \
+  --model_dir models/ccfdm/dmc_cheetah_run/seed_1 \
+  --ckpt best.pt \
   --out_dir videos \
-  --episodes 3 \
-  --fps 30 \
-  --device mps
+  --episodes 3 --fps 30 \
+  --seed 12345 --deterministic
 
-📁 Output:
-videos/
-  └── dmc_walker_walk_seed1_ep0.mp4
+	•	--deterministic: usa select_action (policy mean)
+	•	senza --deterministic: usa sample_action (stocastico)
 
-Se .mp4 non viene scritto:
-
-pip install imageio-ffmpeg
-
-6️⃣ Tutto da main.py (come volevi tu)
-
-✔️ Eval + Render insieme
-python main.py --eval --render \
-  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
-  --device mps
-
-✔️ Modalità subcommand (più pulita)
-python main.py run --do_eval --do_video \
-  --model_dir models/ccfdm/dmc_walker_walk/seed_1 \
-  --device mps
-
+I file escono tipo:
+videos/dmc_cheetah_run_seed12345_ep001.mp4
 
 ⸻
 
-7️⃣ Plot delle curve (stile Fig.5)
-python plots.py \
-  --log_dir logs/ccfdm/dmc_walker_walk/seed_1
-
-Output:
+4) PLOTS (curva Fig.5 style da eval.jsonl)
+python main.py plots --log_dir logs/ccfdm/dmc_cheetah_run/seed_1
+crea 
 logs/.../fig5_eval_curve.png
+B) Come leggere LOG e METRICHE
 
-8️⃣ Workflow consigliato (ordine giusto)
-	1.	✅ Training corto (20k) → verifica che tutto gira
-	2.	🚀 Training lungo (500k)
-	3.	📊 Eval (eval.py)
-	4.	🎥 Video (video.py)
-	5.	📈 Plot (plots.py)
+File di log (JSONL)
+	•	train.jsonl: un record per riga, contiene chiavi come train/critic_loss, train/actor_loss, ecc.
+	•	eval.jsonl: stesso formato, con eval/mean_return ogni --eval_every.
 
-9️⃣ Note importanti (da ricercatrice a ricercatrice)
-	•	L’intrinsic reward è attiva solo in training
-	•	Eval e video usano policy deterministica
-	•	Data augmentation non è più un no-op su DMC 84×84
-	•	CCFDM è paper-faithful (Eq.8 + Eq.9, decay singolo)
+Ogni riga contiene anche:
+	•	step (quando presente)
+	•	_time timestamp
+	•	_elapsed secondi dal start
+
+Metriche principali
+
+Reward
+	•	train/reward_ext_mean: media del reward esterno nel batch RL (quello dell’ambiente)
+	•	train/reward_int_mean: media reward intrinseca (curiosity) nel batch
+	•	train/reward_total_mean: r_ext + intrinsic_weight * r_int
+
+➡️ Se reward_int_mean domina o “esplode”, spesso l’esplorazione diventa rumorosa e l’extrinsic migliora meno.
+
+SAC
+	•	train/critic_loss: MSE TD su Q1+Q2 (più basso non sempre = meglio, ma deve essere stabile)
+	•	train/actor_loss: loss policy (alpha*logpi - Q)
+	•	train/alpha: temperatura (entropia). Se alpha va troppo su, policy troppo random; troppo giù, policy troppo deterministica presto.
+
+CCFDM
+	•	train/contrastive_loss: loss contrastiva Eq.(8) sul “pred next” vs “next target”
+	•	Se scende e poi si stabilizza → rappresentazione consistente
+	•	Se rimane altissima → o predictor fatica o encoder/aug/temperature non vanno
+
+Episodi
+	•	train/episode_return: ritorno totale episodio (solo extrinsic, come lo accumuli nel loop)
+	•	train/episode_length: lunghezza episodio
+
+Eval
+	•	eval/mean_return, eval/std_return: media e dev std su eval_episodes episodi
+
+⸻
+
+C) Parametri CLI: cosa puoi impostare e che effetto hanno
+
+1) Sistema
+	•	--device auto|cpu|mps
+	•	mps su Apple Silicon, più veloce ma a volte più “delicato”
+	•	--seed N
+	•	cambia inizializzazione reti + env train
+	•	--deterministic
+	•	forza algoritmi deterministici (più riproducibile, spesso più lento)
+
+2) Ambiente
+	•	--env dmc|minigrid
+	•	DMC: --dmc_domain, --dmc_task, --camera_id
+	•	MiniGrid: --minigrid_id
+	•	--image_size 84 (crop size usato dal replay)
+	•	--frame_stack 3
+	•	più stack = più memoria temporale visiva, ma input più grande
+	•	--action_repeat 1
+	•	aumenta “frame skip” (azioni ripetute). Cambia dinamica, spesso accelera training.
+	•	--max_episode_steps
+	•	tronca episodi (utile per comparabilità)
+
+3) Training schedule
+	•	--total_steps
+	•	--init_random_steps
+	•	--update_after (default = init_random_steps)
+	•	--update_every
+	•	quante update gradient per step ambiente (più alto = più compute, più sample-efficiency a volte)
+	•	--batch_size
+	•	512 è grossa: stabilità ma richiede replay pieno e compute
+	•	--replay_size
+
+4) Logging / saving / eval
+	•	--log_every stampa e scrive summary
+	•	--save_every checkpoint
+	•	--eval_every, --eval_episodes = stile paper (10k, 10 ep)
+
+5) Architettura encoder
+	•	--hidden_dim
+	•	--encoder_feature_dim (z_dim)
+	•	--num_layers, --num_filters
+	•	più capacità = più compute + rischio overfit, ma spesso meglio su pixel
+
+6) SAC hyperparams
+	•	--discount
+	•	--critic_tau (EMA per target Q)
+	•	--encoder_tau (EMA per target encoder)
+	•	--actor_update_freq
+	•	--critic_target_update_freq
+
+7) CCFDM / contrastive
+	•	--ccfmd_update_freq
+	•	quante volte fai Eq.(8). Più alto = più pressione representation/dynamics, ma può “rubare” capacità al RL.
+	•	--contrastive_method infonce|triplet|byol
+	•	paper: InfoNCE
+	•	--temperature (InfoNCE)
+	•	più bassa = più “sharp”, può instabilizzare; più alta = più morbida
+	•	--normalize / --no_normalize
+	•	normalizzare rende similarity più stabile
+	•	--triplet_margin (solo triplet)
+
+8) Curiosity / intrinsic
+	•	--intrinsic_weight
+	•	paper: 0.2. Se troppo alto → agent “esplora per esplorare”
+	•	--curiosity_C
+	•	scala reward intrinseca (molto impattante)
+	•	--curiosity_gamma
+	•	decay nel tempo: più alto = intrinsic muore prima, più basso = dura a lungo
+
+⸻
