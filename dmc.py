@@ -1,7 +1,7 @@
 # dmc.py
 from __future__ import annotations
 
-from typing import Optional, Tuple, Dict, Any
+from typing import Dict, Any
 
 import numpy as np
 from dm_control import suite
@@ -13,11 +13,14 @@ def resize_to_uint8_chw(img_hwc, image_size):
     if img_hwc.dtype != np.uint8:
         img_hwc = img_hwc.astype(np.uint8)
 
-    im = Image.fromarray(img_hwc)
-    im = im.resize((image_size, image_size), resample=Image.BILINEAR)
-    arr = np.asarray(im, dtype=np.uint8)   # HWC
-    chw = np.transpose(arr, (2, 0, 1))     # CHW
-    return chw
+    if img_hwc.shape[0] == image_size and img_hwc.shape[1] == image_size:
+        arr = img_hwc
+    else:
+        im = Image.fromarray(img_hwc)
+        im = im.resize((image_size, image_size), resample=Image.BILINEAR)
+        arr = np.asarray(im, dtype=np.uint8)
+
+    return np.transpose(arr, (2, 0, 1))
 
 
 class FrameStack:
