@@ -166,3 +166,4 @@ def make_dmc_env(
         camera_id=camera_id,
         max_episode_steps=max_episode_steps,
     )
+#ok 

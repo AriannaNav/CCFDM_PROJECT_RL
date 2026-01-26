@@ -13,7 +13,7 @@ from make_env import EnvSpec, make_env
 from ccfdm_agent import CCFDMAgent
 
 
-def env_tag(spec):
+def env_tag(spec: EnvSpec) -> str:
     name = spec.name.lower().strip()
     if name == "dmc":
         return f"dmc_{spec.domain}_{spec.task}"
@@ -26,7 +26,7 @@ def parse_args():
     p = argparse.ArgumentParser("CCFDM evaluation (loads best.pt)")
 
     p.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "mps"])
-    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--seed", type=int, default=12345, help="seed for eval env + rng")
     p.add_argument("--deterministic", action="store_true")
 
     p.add_argument("--model_dir", type=str, required=True, help=".../models/ccfdm/<env_tag>/seed_X")
@@ -36,12 +36,11 @@ def parse_args():
 
 
 @torch.no_grad()
-def run_eval(agent, env, episodes) :
+def run_eval(agent, env, episodes):
     agent.train(False)
     agent.critic_target.eval()
 
-    rets = []
-    lens = []
+    rets, lens = [], []
     for _ in range(int(episodes)):
         obs, _ = env.reset()
         done = False
@@ -74,6 +73,8 @@ def main_eval():
 
     device = get_device(args.device)
     print(f"[INFO] Device: {device_info(device)}")
+
+    # seed rng
     set_seed(args.seed, args.deterministic, device=device)
 
     cfg_path = os.path.join(args.model_dir, "config.json")
@@ -82,15 +83,46 @@ def main_eval():
 
     cfg = load_json(cfg_path)
     spec = EnvSpec(**cfg["env_spec"])
+    train_args = cfg.get("train_args", {})
+
+    # IMPORTANT: seed eval env explicitly
+    spec.seed = int(args.seed)
 
     env = make_env(spec)
-    print(f"[INFO] Env: {env_tag(spec)}")
+    print(f"[INFO] Env: {env_tag(spec)} seed={spec.seed}")
 
     best_path = os.path.join(args.model_dir, "best.pt")
     if not os.path.isfile(best_path):
         raise FileNotFoundError(f"best.pt not found: {best_path}")
 
-    agent = CCFDMAgent(obs_shape=env.obs_shape, action_shape=env.action_shape, device=device)
+    agent_kwargs = dict(
+        obs_shape=env.obs_shape,
+        action_shape=env.action_shape,
+        device=device,
+
+        # architecture (MUST match train)
+        hidden_dim=int(train_args.get("hidden_dim", 256)),
+        encoder_feature_dim=int(train_args.get("encoder_feature_dim", 50)),
+        num_layers=int(train_args.get("num_layers", 4)),
+        num_filters=int(train_args.get("num_filters", 32)),
+
+        # rl/ccfdm hparams
+        discount=float(train_args.get("discount", 0.99)),
+        critic_tau=float(train_args.get("critic_tau", 0.01)),
+        encoder_tau=float(train_args.get("encoder_tau", 0.01)),
+        actor_update_freq=int(train_args.get("actor_update_freq", 2)),
+        critic_target_update_freq=int(train_args.get("critic_target_update_freq", 2)),
+        ccfmd_update_freq=int(train_args.get("ccfmd_update_freq", 1)),
+        contrastive_method=str(train_args.get("contrastive_method", "infonce")),
+        temperature=float(train_args.get("temperature", 1.0)),
+        normalize=bool(train_args.get("normalize", True)),
+        triplet_margin=float(train_args.get("triplet_margin", 0.2)),
+        curiosity_C=float(train_args.get("curiosity_C", 0.2)),
+        curiosity_gamma=float(train_args.get("curiosity_gamma", 2e-5)),
+        intrinsic_weight=float(train_args.get("intrinsic_weight", 0.2)),
+    )
+
+    agent = CCFDMAgent(**agent_kwargs)
     agent.load(best_path)
 
     stats = run_eval(agent, env, episodes=args.episodes)

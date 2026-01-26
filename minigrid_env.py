@@ -177,4 +177,4 @@ def make_minigrid_env(
         seed=seed,
         max_episode_steps=max_episode_steps,
     )
-#ok 
+#okok

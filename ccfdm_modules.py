@@ -121,10 +121,8 @@ class CURL(nn.Module):
         # curiosity (same bilinear)
         self.curiosity = CuriosityModule(
             device=self.device,
-            bilinear=self.bilinear,
             C=curiosity_C,
             gamma=curiosity_gamma,
-            normalize_inputs=self.normalize,
             eps=self.eps,
         )
 
@@ -191,3 +189,4 @@ class CURL(nn.Module):
         loss_c = self.compute_contrastive_loss(z_pred_next, z_next_target)
 
         return z_t, z_next_target, z_pred_next, loss_c
+    #ok

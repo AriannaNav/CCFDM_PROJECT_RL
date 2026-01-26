@@ -264,3 +264,4 @@ def infonce_metrics_from_logits(logits, labels):
     }
 
 #Se vuoi essere identica alla repo, allora la dissimilarity deve essere L2(q_pred, k_pos), non -bilinear_sim.
+#ok 

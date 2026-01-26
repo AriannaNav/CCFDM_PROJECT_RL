@@ -208,3 +208,15 @@ class SACCritic(nn.Module):
                 L.log_param("train_critic/q1_fc%d" % (i + 1), self.Q1.trunk[i * 2], step)
                 L.log_param("train_critic/q2_fc%d" % (i + 1), self.Q2.trunk[i * 2], step)
 
+"""Collegamento diretto al tuo progetto CCFDM
+
+Questo è fondamentale per te:
+	•	actor e critic non vedono il mondo “grezzo”
+	•	vedono il mondo attraverso feature apprese
+	•	queste feature sono:
+	•	regolarizzate da contrastive learning
+	•	forzate a essere temporali da FDM
+	•	rese esplorative dal curiosity module
+
+👉 SAC è “in cima” alla piramide, ma la qualità di tutto dipende dalla rappresentazione sotto.
+"""

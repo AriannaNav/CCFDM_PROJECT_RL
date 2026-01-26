@@ -106,3 +106,4 @@ def make_encoder(encoder_type, obs_shape, feature_dim, num_layers, num_filters, 
         num_filters=num_filters,
         output_logits=output_logits,
     )
+#ok 
