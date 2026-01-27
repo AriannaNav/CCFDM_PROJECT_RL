@@ -60,40 +60,6 @@ def center_crop(imgs, out_size):
     return imgs[:, :, y0:y0 + out_size, x0:x0 + out_size]
 
 
-def random_shift(imgs, pad: int = 4):
-    """
-    DrQ-style random shift:
-      - pad with edge values
-      - random crop back to original HxW
-    Works even when H=W=out_size (e.g. 84x84), unlike random_crop(84->84) which is a no-op.
-
-    imgs: (B, C, H, W) uint8
-    returns: (B, C, H, W) uint8
-    """
-    b, c, h, w = imgs.shape
-    if pad <= 0:
-        return imgs
-
-    p = int(pad)
-    imgs_pad = np.pad(
-        imgs,
-        pad_width=((0, 0), (0, 0), (p, p), (p, p)),
-        mode="edge",
-    )
-
-    # choose top-left corner in [0..2p]
-    max_off = 2 * p
-    ys = np.random.randint(0, max_off + 1, size=b)
-    xs = np.random.randint(0, max_off + 1, size=b)
-
-    out = np.empty((b, c, h, w), dtype=imgs.dtype)
-    for i in range(b):
-        y = ys[i]
-        x = xs[i]
-        out[i] = imgs_pad[i, :, y:y + h, x:x + w]
-    return out
-
-
 def to_torch_obs(obs_u8, device, bits=5):
     obs_u8 = np.ascontiguousarray(obs_u8)  # <-- safety
     t = torch.from_numpy(obs_u8)
@@ -201,8 +167,8 @@ class ReplayBuffer:
         next_obs_u8 = self._next_obses[idxs]
 
         # COME REPO: crop (non shift)
-        obs_u8 = random_shift(obs_u8, self.image_size)
-        next_obs_u8 = random_shift(next_obs_u8, self.image_size)
+        obs_u8 = random_crop(obs_u8, self.image_size)
+        next_obs_u8 = random_crop(next_obs_u8, self.image_size)
 
         obs = to_torch_obs(obs_u8, self.device)          # fa preprocess bits=5
         next_obs = to_torch_obs(next_obs_u8, self.device)

@@ -11,6 +11,7 @@ import torch
 from utils import get_device, device_info, set_seed, load_json, save_json
 from make_env import EnvSpec, make_env
 from ccfdm_agent import CCFDMAgent
+from data import center_crop
 
 
 def env_tag(spec: EnvSpec) -> str:
@@ -47,7 +48,8 @@ def run_eval(agent, env, episodes):
         ep_ret = 0.0
         ep_len = 0
         while not done:
-            a = agent.select_action(obs)
+            obs_in = center_crop(obs, out_size=84)
+            a = agent.select_action(obs_in)
             a = np.clip(a, env.action_low, env.action_high).astype(np.float32)
             obs, r, term, trunc, _ = env.step(a)
             ep_ret += float(r)
@@ -96,7 +98,8 @@ def main_eval():
         raise FileNotFoundError(f"best.pt not found: {best_path}")
 
     agent_kwargs = dict(
-        obs_shape=env.obs_shape,
+        img_size = int(train_args.get("image_size", 84)),
+        obs_shape=(env.obs_shape[0], img_size, img_size),
         action_shape=env.action_shape,
         device=device,
 

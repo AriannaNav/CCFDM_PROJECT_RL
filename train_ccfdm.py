@@ -14,6 +14,7 @@ from logger import Logger
 from make_env import EnvSpec, make_env
 from data import ReplayBuffer
 from ccfdm_agent import CCFDMAgent
+from data import center_crop
 
 
 def env_tag(spec: EnvSpec) -> str:
@@ -150,7 +151,8 @@ def run_eval_episodes(agent, env_eval, episodes):
         done = False
         ep_ret = 0.0
         while not done:
-            a = agent.select_action(obs)
+            obs84 = center_crop(obs[None], 84)[0]
+            a = agent.select_action(obs84)
             a = np.clip(a, env_eval.action_low, env_eval.action_high).astype(np.float32)
             obs, r, term, trunc, _ = env_eval.step(a)
             ep_ret += float(r)
@@ -185,6 +187,7 @@ def main_train():
 
     print(f"[INFO] Env(train): {env_tag(spec)} obs_shape={env_train.obs_shape} action_shape={env_train.action_shape}")
     print(f"[INFO] Env(eval) : {env_tag(spec_eval)} seed={spec_eval.seed}")
+    
 
     dirs = build_run_dirs(args.models_root, args.logs_root, algo="ccfdm", spec=spec, seed=args.seed)
     model_dir, log_dir = dirs["model_dir"], dirs["log_dir"]
@@ -210,8 +213,10 @@ def main_train():
         image_size=spec.image_size,
     )
 
+    train_obs_shape = (env_train.obs_shape[0], spec.image_size, spec.image_size)
+
     agent = CCFDMAgent(
-        obs_shape=env_train.obs_shape,
+        obs_shape=train_obs_shape,
         action_shape=env_train.action_shape,
         device=device,
         hidden_dim=args.hidden_dim,
@@ -254,7 +259,8 @@ def main_train():
         if step <= args.init_random_steps:
             action = sample_random_action(env_train)
         else:
-            action = agent.sample_action(obs)
+            obs84 = center_crop(obs[None], spec.image_size)[0]   # (C,84,84) uint8
+            action = agent.sample_action(obs84)
             action = np.clip(action, env_train.action_low, env_train.action_high).astype(np.float32)
 
         next_obs, reward, terminated, truncated, _info = env_train.step(action)

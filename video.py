@@ -12,6 +12,7 @@ import imageio.v2 as imageio
 from make_env import EnvSpec, make_env
 from utils import get_device, device_info, set_seed, make_dir
 from ccfdm_agent import CCFDMAgent
+from data import center_crop 
 
 
 def load_config(model_dir: str) -> dict:
@@ -76,7 +77,8 @@ def build_agent_from_cfg(env, device, cfg: dict) -> CCFDMAgent:
 
     # IMPORTANT: must match training architecture/hparams, otherwise load(best.pt) may fail
     agent_kwargs = dict(
-        obs_shape=env.obs_shape,
+        img_size = int(train_args.get("image_size", 84)),
+        obs_shape=(env.obs_shape[0], img_size, img_size),
         action_shape=env.action_shape,
         device=device,
 
@@ -119,10 +121,12 @@ def rollout_video(env, agent, episodes: int, deterministic: bool, max_steps: int
         t = 0
 
         while not done:
+            obs_in = center_crop(obs, out_size=84)
+
             if deterministic:
-                action = agent.select_action(obs)
+                action = agent.select_action(obs_in)
             else:
-                action = agent.sample_action(obs)
+                action = agent.sample_action(obs_in)
 
             action = np.clip(action, env.action_low, env.action_high).astype(np.float32)
             obs, _reward, terminated, truncated, _info = env.step(action)

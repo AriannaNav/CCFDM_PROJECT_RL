@@ -73,7 +73,7 @@ class DMCEnv:
         self.max_episode_steps = max_episode_steps
 
         # render bigger so that random_crop(., 84) is not a no-op
-        self.render_size = self.image_size 
+        self.render_size = self.image_size + 16 
 
         env = suite.load(domain_name=domain, task_name=task, task_kwargs={"random": seed})
         env = pixels.Wrapper(
