@@ -50,18 +50,9 @@ class PixelEncoder(nn.Module):
         return x
 
     def forward_conv(self, obs):
-        # Make encoder robust: accept uint8 or float in [0..255] or already-preprocessed float.
-        if obs.dtype == torch.uint8:
-            obs = obs.float() / 255.0 - 0.5
-        else:
-            # if it looks like 0..255 floats, normalize like preprocess would before the -0.5 shift
-            if obs.max() > 1.5:
-                obs = obs / 255.0 - 0.5
-            # else: assume already preprocessed (e.g. [-0.5, 0.5]) and do nothing
-
+        assert obs.dtype == torch.float32
         h = self._forward_convs(obs)
-        h = h.view(h.size(0), -1)
-        return h
+        return h.view(h.size(0), -1)
 
     def forward(self, obs, detach = False):
         h = self.forward_conv(obs)

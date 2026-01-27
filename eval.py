@@ -11,7 +11,7 @@ import torch
 from utils import get_device, device_info, set_seed, load_json, save_json
 from make_env import EnvSpec, make_env
 from ccfdm_agent import CCFDMAgent
-from data import center_crop
+from data import center_crop, preprocess_obs_eval
 
 
 def env_tag(spec: EnvSpec) -> str:
@@ -37,7 +37,7 @@ def parse_args():
 
 
 @torch.no_grad()
-def run_eval(agent, env, episodes):
+def run_eval(agent, env, episodes, img_size: int):
     agent.train(False)
     agent.critic_target.eval()
 
@@ -48,8 +48,8 @@ def run_eval(agent, env, episodes):
         ep_ret = 0.0
         ep_len = 0
         while not done:
-            obs_in = center_crop(obs, out_size=84)
-            a = agent.select_action(obs_in)
+            obs_x = center_crop(obs[None], img_size)[0]   # uint8 CHW
+            a = agent.select_action(obs_x)
             a = np.clip(a, env.action_low, env.action_high).astype(np.float32)
             obs, r, term, trunc, _ = env.step(a)
             ep_ret += float(r)
@@ -97,8 +97,8 @@ def main_eval():
     if not os.path.isfile(best_path):
         raise FileNotFoundError(f"best.pt not found: {best_path}")
 
+    img_size = int(train_args.get("image_size", 84))
     agent_kwargs = dict(
-        img_size = int(train_args.get("image_size", 84)),
         obs_shape=(env.obs_shape[0], img_size, img_size),
         action_shape=env.action_shape,
         device=device,
@@ -129,7 +129,7 @@ def main_eval():
     agent = CCFDMAgent(**agent_kwargs)
     agent.load(best_path)
 
-    stats = run_eval(agent, env, episodes=args.episodes)
+    stats = run_eval(agent, env, episodes=args.episodes, img_size=img_size)
     print("[EVAL]", stats)
 
     save_json(os.path.join(args.model_dir, "eval_result.json"), {"env_spec": asdict(spec), **stats})

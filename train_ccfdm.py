@@ -141,7 +141,7 @@ def save_checkpoint(agent, model_dir, name):
 
 
 @torch.no_grad()
-def run_eval_episodes(agent, env_eval, episodes):
+def run_eval_episodes(agent, env_eval, episodes, img_size: int):
     agent.train(False)
     agent.critic_target.eval()
 
@@ -151,8 +151,8 @@ def run_eval_episodes(agent, env_eval, episodes):
         done = False
         ep_ret = 0.0
         while not done:
-            obs84 = center_crop(obs[None], 84)[0]
-            a = agent.select_action(obs84)
+            obs_x = center_crop(obs[None], img_size)[0]
+            a = agent.select_action(obs_x)
             a = np.clip(a, env_eval.action_low, env_eval.action_high).astype(np.float32)
             obs, r, term, trunc, _ = env_eval.step(a)
             ep_ret += float(r)
@@ -311,7 +311,7 @@ def main_train():
             logger.flush()
 
         if args.eval_every and step % args.eval_every == 0:
-            mean_ret, std_ret = run_eval_episodes(agent, env_eval, episodes=args.eval_episodes)
+            mean_ret, std_ret = run_eval_episodes(agent, env_eval, episodes=args.eval_episodes, img_size=spec.image_size)
             eval_logger.log_dict({"eval/mean_return": mean_ret, "eval/std_return": std_ret, "eval/episodes": int(args.eval_episodes)}, step=step)
             eval_logger.flush()
 

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from sac import SACActor, SACCritic
 from ccfdm_modules import CURL
 from utils import soft_update
+from data import preprocess_obs_eval
 
 
 class CCFDMAgent(object):
@@ -187,16 +188,28 @@ class CCFDMAgent(object):
         self.critic_target.eval()
 
     # ---------------- acting ----------------
+    def _obs_to_tensor_eval(self, obs_u8_or_f32):
+        # accetta CHW uint8 o float, e anche BCHW
+        t = torch.as_tensor(obs_u8_or_f32, device=self.device)
+        if t.ndim == 3:
+            t = t.unsqueeze(0)
+        t = t.to(dtype=torch.float32)
+        # se arriva già in [-0.5,0.5] non lo toccare:
+        # (ma di solito arriva 0..255)
+        if t.max() > 1.0:
+            t = preprocess_obs_eval(t, bits=5)
+        return t
 
     def select_action(self, obs):
         with torch.no_grad():
-            obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32).unsqueeze(0)
+            obs = self._obs_to_tensor_eval(obs)
             mu, _, _, _ = self.actor(obs, compute_pi=False, compute_log_pi=False)
             return mu.cpu().numpy().flatten()
 
+
     def sample_action(self, obs):
         with torch.no_grad():
-            obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32).unsqueeze(0)
+            obs = self._obs_to_tensor_eval(obs)
             _, pi, _, _ = self.actor(obs, compute_pi=True, compute_log_pi=False)
             return pi.cpu().numpy().flatten()
 

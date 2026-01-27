@@ -19,6 +19,15 @@ def preprocess_obs(obs, bits=5):
     obs = obs - 0.5
     return obs
 
+def preprocess_obs_eval(obs, bits=5):
+    # come preprocess_obs ma SENZA uniform noise
+    bins = 2 ** bits
+    if bits < 8:
+        obs = torch.floor(obs / 2 ** (8 - bits))
+    obs = obs / bins
+    obs = obs - 0.5
+    return obs
+
 def random_crop(imgs, out_size):
     """
     imgs: (B, C, H, W)

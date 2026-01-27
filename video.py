@@ -75,9 +75,9 @@ def save_video_mp4(frames: list[np.ndarray], path: str, fps: int = 30):
 def build_agent_from_cfg(env, device, cfg: dict) -> CCFDMAgent:
     train_args = cfg.get("train_args", {}) or {}
 
+    img_size = int(train_args.get("image_size", 84))
     # IMPORTANT: must match training architecture/hparams, otherwise load(best.pt) may fail
     agent_kwargs = dict(
-        img_size = int(train_args.get("image_size", 84)),
         obs_shape=(env.obs_shape[0], img_size, img_size),
         action_shape=env.action_shape,
         device=device,
@@ -111,9 +111,8 @@ def build_agent_from_cfg(env, device, cfg: dict) -> CCFDMAgent:
 
 
 @torch.no_grad()
-def rollout_video(env, agent, episodes: int, deterministic: bool, max_steps: int | None):
+def rollout_video(env, agent, episodes: int, deterministic: bool, max_steps: int | None, img_size: int):
     videos = []
-
     for _ep in range(int(episodes)):
         obs, _info = env.reset()
         done = False
@@ -121,12 +120,12 @@ def rollout_video(env, agent, episodes: int, deterministic: bool, max_steps: int
         t = 0
 
         while not done:
-            obs_in = center_crop(obs, out_size=84)
+            obs_x = center_crop(obs[None], img_size)[0]
 
             if deterministic:
-                action = agent.select_action(obs_in)
+                action = agent.select_action(obs_x)
             else:
-                action = agent.sample_action(obs_in)
+                action = agent.sample_action(obs_x)
 
             action = np.clip(action, env.action_low, env.action_high).astype(np.float32)
             obs, _reward, terminated, truncated, _info = env.step(action)
@@ -185,6 +184,8 @@ def main_video():
     print(f"[INFO] Loaded: {ckpt_path}")
 
     out_dir = make_dir(args.out_dir)
+    train_args = cfg.get("train_args", {}) or {}
+    img_size = int(train_args.get("image_size", 84))
 
     videos = rollout_video(
         env=env,
@@ -192,6 +193,7 @@ def main_video():
         episodes=args.episodes,
         deterministic=args.deterministic,
         max_steps=args.max_steps,
+        img_size=img_size,
     )
 
     # naming with env tag
